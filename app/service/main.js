@@ -95,15 +95,17 @@ function tryReadRaw(p) { try { return fs.readFileSync(p, 'utf8'); } catch (e) { 
 
 var telemetryCache = {at: 0, data: null};
 var TELEMETRY_TTL_MS = 1000;
+var bootIdCache = undefined, cpuCoresCache = undefined, thermalPathCache = undefined;
 
 function readTelemetry() {
     var now = Date.now();
     if (telemetryCache.data && now - telemetryCache.at < TELEMETRY_TTL_MS) {
         return Object.assign({}, telemetryCache.data);
     }
+    if (bootIdCache === undefined) bootIdCache = tryRead('/proc/sys/kernel/random/boot_id');
     var out = {
         ts: Math.floor(now / 1000),
-        boot_id: tryRead('/proc/sys/kernel/random/boot_id'),
+        boot_id: bootIdCache,
         hostname: tryRead('/etc/hostname'),
         loadavg: tryRead('/proc/loadavg'),
         cpu_online: tryRead('/sys/devices/system/cpu/online'),
@@ -115,9 +117,11 @@ function readTelemetry() {
     if (up) out.uptime_s = parseFloat(up.split(WHITESPACE_RE)[0]);
     else out.uptime_s = null;
 
-    var cpuinfo = tryReadRaw('/proc/cpuinfo');
-    if (cpuinfo) out.cpu_cores = (cpuinfo.match(PROCESSOR_LINE_RE) || []).length;
-    else out.cpu_cores = null;
+    if (cpuCoresCache === undefined) {
+        var cpuinfo = tryReadRaw('/proc/cpuinfo');
+        cpuCoresCache = cpuinfo ? (cpuinfo.match(PROCESSOR_LINE_RE) || []).length : null;
+    }
+    out.cpu_cores = cpuCoresCache;
 
     var freq = tryRead('/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq');
     if (freq) out.cpu_freq_khz = parseInt(freq, 10);
@@ -137,18 +141,34 @@ function readTelemetry() {
     }
 
     var temp = null;
-    ['/sys/class/thermal', '/sys/devices/virtual/thermal'].forEach(function (dir) {
-        if (temp) return;
-        var zones = [];
-        try { zones = fs.readdirSync(dir).filter(function (n) { return THERMAL_ZONE_RE.test(n); }).sort(); } catch (e) { zones = []; }
-        zones.forEach(function (zone) { if (!temp) temp = tryRead(dir + '/' + zone + '/temp'); });
-    });
-    // Samsung's TVs have no Linux thermal zones (nothing under /sys/class/thermal): the SoC driver exposes the
-    // temperature in whole degrees, as <soc>/<name>.thermal/temperature (56 on a Q80A), readable by everyone.
-    if (!temp) {
-        var soc = '/sys/devices/platform/soc', names = [];
-        try { names = fs.readdirSync(soc).filter(function (n) { return THERMAL_DEVICE_RE.test(n); }).sort(); } catch (e) { names = []; }
-        names.forEach(function (n) { if (!temp) temp = tryRead(soc + '/' + n + '/temperature'); });
+    if (thermalPathCache !== undefined) {
+        if (thermalPathCache) temp = tryRead(thermalPathCache);
+    } else {
+        var foundThermal = null;
+        ['/sys/class/thermal', '/sys/devices/virtual/thermal'].forEach(function (dir) {
+            if (temp) return;
+            var zones = [];
+            try { zones = fs.readdirSync(dir).filter(function (n) { return THERMAL_ZONE_RE.test(n); }).sort(); } catch (e) { zones = []; }
+            zones.forEach(function (zone) {
+                if (temp) return;
+                var p = dir + '/' + zone + '/temp';
+                temp = tryRead(p);
+                if (temp) foundThermal = p;
+            });
+        });
+        // Samsung's TVs have no Linux thermal zones (nothing under /sys/class/thermal): the SoC driver exposes the
+        // temperature in whole degrees, as <soc>/<name>.thermal/temperature (56 on a Q80A), readable by everyone.
+        if (!temp) {
+            var soc = '/sys/devices/platform/soc', names = [];
+            try { names = fs.readdirSync(soc).filter(function (n) { return THERMAL_DEVICE_RE.test(n); }).sort(); } catch (e) { names = []; }
+            names.forEach(function (n) {
+                if (temp) return;
+                var p = soc + '/' + n + '/temperature';
+                temp = tryRead(p);
+                if (temp) foundThermal = p;
+            });
+        }
+        thermalPathCache = foundThermal;
     }
     if (temp) { var t = parseInt(temp, 10); out.soctemp_c = (t > 1000) ? (t / 1000) : t; }
     else out.soctemp_c = null;
@@ -1039,7 +1059,7 @@ function schedulePresence(){
  presenceTimer=setTimeout(function(){
   if(!bridge.connected){schedulePresence();return;}
   presence.read().then(function(d){
-   var fg=d.foreground;if(fg){var row=apps.normalize(state.apps,state.packages).filter(function(a){return a.appId===fg.appId})[0];fg=Object.assign({name:row&&row.name||fg.appId},fg);}
+   var fg=d.foreground;if(fg){var list=state.apps||[],name=fg.appId;for(var i=0;i<list.length;i++){if(list[i]&&(list[i].id===fg.appId||list[i].appId===fg.appId)){if(list[i].name)name=list[i].name;break;}}fg=Object.assign({name:name},fg);}
    bridge.publishPresence(fg);
   }).catch(function(){}).then(schedulePresence);
  },5000);if(presenceTimer.unref)presenceTimer.unref();

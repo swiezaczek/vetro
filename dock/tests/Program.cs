@@ -865,7 +865,7 @@ namespace Launcher.Tests
             T.Run("icons: rounded corners, and loose logos go on a tile", () =>
             {
                 // A fully opaque square tile: only the four corners may change.
-                int s = 128;
+                int s = DockLayout.FocusIcon;
                 var solid = new uint[s * s];
                 for (int i = 0; i < solid.Length; i++) solid[i] = 0xFF2080FFu;
                 var done = IconPrep.Prepare(solid, s, s);
@@ -874,7 +874,7 @@ namespace Launcher.Tests
                 T.Eq(done[s / 2 * s + s / 2], 0xFF2080FFu, "the middle is untouched");
                 int r = IconPrep.Corner(s);
                 T.Eq(r, (int)Math.Round(Design.IconRadiusPct * s / 100.0), "the radius is the design's percentage of the side");
-                T.Eq(r, 20, "16% of 128");
+                T.Eq(r, 18, "16% of 112");
                 // The thin light line lies just inside the edge, and only there.
                 uint edge = done[s / 2];
                 T.True(((edge >> 16) & 0xFF) > 0x20 && (edge >> 24) == 255u, "the middle of an edge carries the light line");
@@ -882,7 +882,7 @@ namespace Launcher.Tests
                 T.Eq(done[r * s + 0] >> 24, 255u, "below the corner arc the edge is opaque");
                 // A transparent canvas with a small opaque square: a loose logo.
                 var loose = new uint[s * s];
-                for (int y = 40; y < 88; y++) for (int x = 40; x < 88; x++) loose[y * s + x] = 0xFFFFFFFFu;
+                for (int y = 36; y < 76; y++) for (int x = 36; x < 76; x++) loose[y * s + x] = 0xFFFFFFFFu;
                 T.True(IconPrep.Coverage(loose) < IconPrep.LooseCoverage, "coverage says loose");
                 var tiled = IconPrep.Prepare(loose, s, s);
                 T.Eq(tiled[s / 2 * s + 6] >> 24, 255u, "the tile fills what the logo left empty");
@@ -891,18 +891,18 @@ namespace Launcher.Tests
                 T.True(((centre >> 16) & 0xFF) > 200, "the logo sits in the middle, still light");
                 T.True(((tiled[s / 2 * s + 6] >> 16) & 0xFF) < 100, "and the tile around it is dark");
                 // Not square: never cropped, always ends square.
-                var wide = new uint[200 * 100];
+                var wide = new uint[100 * 50];
                 for (int i = 0; i < wide.Length; i++) wide[i] = 0xFFFF0000u;
-                var sq = IconPrep.Prepare(wide, 200, 100);
-                T.Eq(sq.Length, 200 * 200, "a wide icon becomes a square of its longer side");
-                T.Eq(sq[100 * 200 + 100], 0xFFFF0000u, "the whole picture sits in the middle");
-                T.Eq(sq[5 * 200 + 100] >> 24, 255u, "the blurred fill covers the band above it (no transparent bars)");
+                var sq = IconPrep.Prepare(wide, 100, 50);
+                T.Eq(sq.Length, 100 * 100, "a wide icon becomes a square of its longer side");
+                T.Eq(sq[50 * 100 + 50], 0xFFFF0000u, "the whole picture sits in the middle");
+                T.Eq(sq[5 * 100 + 50] >> 24, 255u, "the blurred fill covers the band above it (no transparent bars)");
                 T.Eq(sq[0] >> 24, 0u, "and the corners are rounded");
                 // A banner as big as the screen: brought down, then treated the same way.
                 var banner = new uint[1920 * 1080];
                 for (int i = 0; i < banner.Length; i++) banner[i] = (i / 1920) < 540 ? 0xFF40C0FFu : 0xFFC0E0FFu;
                 var bi = IconPrep.Prepare(banner, 1920, 1080);
-                T.Eq(bi.Length, IconPrep.MaxSide * IconPrep.MaxSide, "a 1920x1080 banner ends as a 256 px square");
+                T.Eq(bi.Length, IconPrep.MaxSide * IconPrep.MaxSide, "a 1920x1080 banner ends as a 112 px square");
                 T.Eq(bi[(IconPrep.MaxSide / 2) * IconPrep.MaxSide + IconPrep.MaxSide / 2] >> 24, 255u, "opaque in the middle");
                 var half = IconPrep.Halve(new uint[] { 0xFF000000u, 0xFF0000FFu, 0xFF00FF00u, 0xFFFFFFFFu }, 2, 2);
                 T.Eq(half.Length, 1, "halving 2x2 gives one pixel");
