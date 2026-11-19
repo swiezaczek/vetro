@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
@@ -80,10 +81,13 @@ namespace Launcher
         private readonly HashSet<int> _homeCodes;
         private readonly Action<string> _log;
         private readonly object _sync = new object();
+        private const int FallbackCooldownSeconds = 2;
+        private static readonly long FallbackCooldownTicks = FallbackCooldownSeconds * Stopwatch.Frequency;
+
         private readonly Dictionary<string, InputDeviceInfo> _desired = new Dictionary<string, InputDeviceInfo>(StringComparer.Ordinal);
         private readonly Dictionary<string, GrabbedNode> _active = new Dictionary<string, GrabbedNode>(StringComparer.Ordinal);
         private readonly HashSet<string> _failedNodes = new HashSet<string>(StringComparer.Ordinal);
-        private readonly HashSet<string> _fallbackNodes = new HashSet<string>(StringComparer.Ordinal);
+        private readonly Dictionary<string, long> _fallbackUntil = new Dictionary<string, long>(StringComparer.Ordinal);
         private readonly ManualResetEventSlim _ungrabbedEvent = new ManualResetEventSlim(true);
 
         private int _eventReadFd = -1, _eventWriteFd = -1;
@@ -141,7 +145,7 @@ namespace Launcher
             {
                 if (_grabWanted == wanted) return;
                 _grabWanted = wanted;
-                _fallbackNodes.Clear();
+                _fallbackUntil.Clear();
                 if (!wanted && _active.Count > 0) _ungrabbedEvent.Reset();
             }
             Wake();
@@ -150,20 +154,63 @@ namespace Launcher
 
         public void UpdateDevices(List<InputDeviceInfo> physicalDevices)
         {
+            bool changed = false;
+            long now = Stopwatch.GetTimestamp();
             lock (_sync)
             {
+                int nextCount = 0;
+                if (physicalDevices != null)
+                {
+                    foreach (InputDeviceInfo d in physicalDevices)
+                    {
+                        if (d.IsVetroForwarded) continue;
+                        nextCount++;
+                        if (!_desired.ContainsKey(d.Node)) changed = true;
+                    }
+                }
+                if (nextCount != _desired.Count) changed = true;
+
                 _desired.Clear();
                 if (physicalDevices != null)
                     foreach (InputDeviceInfo d in physicalDevices)
                         if (!d.IsVetroForwarded) _desired[d.Node] = d;
+
+                if (_fallbackUntil.Count > 0)
+                {
+                    List<string> remove = null;
+                    foreach (var kv in _fallbackUntil)
+                    {
+                        bool stale = !_desired.ContainsKey(kv.Key);
+                        bool expired = now >= kv.Value;
+                        if (stale || expired)
+                        {
+                            if (remove == null) remove = new List<string>();
+                            remove.Add(kv.Key);
+                            if (!stale && expired) changed = true;
+                        }
+                    }
+                    if (remove != null)
+                        foreach (string key in remove) _fallbackUntil.Remove(key);
+                }
             }
-            Wake();
+            if (changed) Wake();
         }
 
         public bool ShouldWatchPassively(InputDeviceInfo device)
         {
             if (device.IsVetroForwarded) return true;
-            lock (_sync) return !_grabWanted || _fallbackNodes.Contains(device.Node);
+            long now = Stopwatch.GetTimestamp();
+            lock (_sync)
+            {
+                if (!_grabWanted) return true;
+                long until;
+                if (_fallbackUntil.TryGetValue(device.Node, out until))
+                {
+                    if (now < until) return true;
+                    _fallbackUntil.Remove(device.Node);
+                }
+                return false;
+            }
         }
 
         private void Wake()
@@ -303,13 +350,18 @@ namespace Launcher
 
                 if (!stopping && grabWanted)
                 {
+                    long now = Stopwatch.GetTimestamp();
                     foreach (var kv in _desired)
                     {
-                        if (!_active.ContainsKey(kv.Key) && !_fallbackNodes.Contains(kv.Key))
+                        if (_active.ContainsKey(kv.Key)) continue;
+                        long until;
+                        if (_fallbackUntil.TryGetValue(kv.Key, out until))
                         {
-                            if (toAdd == null) toAdd = new List<InputDeviceInfo>();
-                            toAdd.Add(kv.Value);
+                            if (now < until) continue;
+                            _fallbackUntil.Remove(kv.Key);
                         }
+                        if (toAdd == null) toAdd = new List<InputDeviceInfo>();
+                        toAdd.Add(kv.Value);
                     }
                 }
             }
@@ -334,12 +386,12 @@ namespace Launcher
                         lock (_sync)
                         {
                             if (_stopping || !_grabWanted) grabbed.Dispose();
-                            else { _active[info.Node] = grabbed; _failedNodes.Remove(info.Node); _fallbackNodes.Remove(info.Node); }
+                            else { _active[info.Node] = grabbed; _failedNodes.Remove(info.Node); _fallbackUntil.Remove(info.Node); }
                         }
                     }
                     else
                     {
-                        lock (_sync) _fallbackNodes.Add(info.Node);
+                        lock (_sync) _fallbackUntil[info.Node] = Stopwatch.GetTimestamp() + FallbackCooldownTicks;
                         fallbackNeeded = true;
                     }
                 }
@@ -362,7 +414,7 @@ namespace Launcher
             {
                 _active.Remove(node.Info.Node);
                 _desired.Remove(node.Info.Node);
-                _fallbackNodes.Remove(node.Info.Node);
+                _fallbackUntil.Remove(node.Info.Node);
             }
             node.Dispose();
             _log("grabber: lost " + node.Info.Node);

@@ -334,7 +334,22 @@ namespace Launcher
         {
             try
             {
-                while ((long)Libc.read(_inotifyFd, InotifyBuf, (UIntPtr)InotifyBuf.Length) > 0) { }
+                while (true)
+                {
+                    long n = (long)Libc.read(_inotifyFd, InotifyBuf, (UIntPtr)InotifyBuf.Length);
+                    if (n > 0) continue;
+                    if (n < 0)
+                    {
+                        int err = Marshal.GetLastWin32Error();
+                        if (err == EAgain) break;
+                        if (err == Libc.EINTR) continue;
+                        Log("input: inotify error errno=" + err);
+                    }
+                    else Log("input: inotify eof");
+                    if (_inotifyHandler != IntPtr.Zero) { Efl.ecore_main_fd_handler_del(_inotifyHandler); _inotifyHandler = IntPtr.Zero; }
+                    if (_inotifyFd >= 0) { Libc.close(_inotifyFd); _inotifyFd = -1; }
+                    return 0;
+                }
                 WatchNewNodes();
                 if (_inotifyRescanTimer == IntPtr.Zero)
                     _inotifyRescanTimer = Efl.ecore_timer_add(0.15, InotifyRescanCb, IntPtr.Zero);
@@ -823,7 +838,19 @@ namespace Launcher
                     int room = GrabPipeBuf.Length - _grabPipeCarry;
                     if (room <= 0) { _grabPipeCarry = 0; room = GrabPipeBuf.Length; }
                     long n = (long)Libc.read(_grabber.EventReadFd, GrabPipeReadBuf, (UIntPtr)Math.Min(room, GrabPipeReadBuf.Length));
-                    if (n <= 0) break;
+                    if (n <= 0)
+                    {
+                        if (n < 0)
+                        {
+                            int err = Marshal.GetLastWin32Error();
+                            if (err == EAgain) break;
+                            if (err == Libc.EINTR) continue;
+                            Log("grab pipe error errno=" + err);
+                        }
+                        else Log("grab pipe eof");
+                        if (_grabPipeHandler != IntPtr.Zero) { Efl.ecore_main_fd_handler_del(_grabPipeHandler); _grabPipeHandler = IntPtr.Zero; }
+                        return 0;
+                    }
                     Buffer.BlockCopy(GrabPipeReadBuf, 0, GrabPipeBuf, _grabPipeCarry, (int)n);
                     int total = _grabPipeCarry + (int)n;
                     int pos = 0;
@@ -887,8 +914,17 @@ namespace Launcher
                 for (int round = 0; round < 8; round++)
                 {
                     long n = (long)Libc.read(_inputFds[index], InputBuf, (UIntPtr)InputBuf.Length);
-                    if (n < 0 && Marshal.GetLastWin32Error() != EAgain) { DropNode(index); break; }
-                    if (n <= 0) break;
+                    if (n <= 0)
+                    {
+                        if (n < 0)
+                        {
+                            int err = Marshal.GetLastWin32Error();
+                            if (err == EAgain) break;
+                            if (err == Libc.EINTR) continue;
+                        }
+                        DropNode(index);
+                        break;
+                    }
                     InputPresses.Clear();
                     _inputReaders[index].Feed(InputBuf, (int)n, InputPresses);
                     for (int k = 0; k < InputPresses.Count; k++)
@@ -936,7 +972,7 @@ namespace Launcher
         private static void SetupForegroundMonitor()
         {
             if (_guardApps == null) return;
-            try { Efl.ecore_main_loop_glib_integrate(); }
+            try { Log("glib integrate: " + Efl.ecore_main_loop_glib_integrate()); }
             catch (Exception ex) { Log("glib integrate: " + ex.Message); }
             try
             {

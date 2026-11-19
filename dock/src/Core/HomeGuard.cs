@@ -17,7 +17,7 @@ namespace Launcher.Core
         public static bool ShouldCancel(string[] ids, string appId)
         {
             return ids != null && appId != null &&
-                (Array.IndexOf(ids, appId) >= 0 || appId == "com.samsung.tv.coba.newhome" || appId == "com.samsung.tv.coba.home");
+                (Array.IndexOf(ids, appId) >= 0 || appId == "com.samsung.tv.coba.newhome" || appId == "com.samsung.tv.coba.home" || appId == "com.samsung.tv.home.media");
         }
 
         public static string Command(string[] ids, string file, int generation)
@@ -96,8 +96,7 @@ namespace Launcher.Core
                     _sawAllowedHome = true;
                     return ForegroundAction.None;
                 }
-                if ((_sawAllowedHome && !string.IsNullOrEmpty(fullscreenAppId)) ||
-                    (!_sawAllowedHome && now - _allowedAt > 10.0 && !string.IsNullOrEmpty(fullscreenAppId)))
+                if (_sawAllowedHome || (!_sawAllowedHome && now - _allowedAt > 10.0))
                 {
                     _allowed = false;
                     _sawAllowedHome = false;

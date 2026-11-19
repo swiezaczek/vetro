@@ -191,6 +191,7 @@ namespace Launcher.Tests
             {
                 string[] ids = HomeGuard.Parse("com.samsung.tv.csfs,com.samsung.tv.home.sidebar,com.samsung.tv.home.media,com.samsung.tv.coba.newhome,com.samsung.tv.coba.home");
                 T.True(HomeGuard.ShouldCancel(ids, "com.samsung.tv.coba.home"), "coba.home recognised");
+                T.True(HomeGuard.ShouldCancel(ids, "com.samsung.tv.home.media"), "home.media recognised");
                 var p = new HomeForegroundPolicy();
                 T.Eq(p.Evaluate(ids, "org.tizen.netflix-app", "", false, 10.0, -100.0, 1.5), ForegroundAction.None, "normal app ignored");
                 T.Eq(p.Evaluate(ids, "com.samsung.tv.csfs", "", false, 10.0, -100.0, 1.5), ForegroundAction.KillAndShow, "unexpected fullscreen Home kills and shows dock");
@@ -206,6 +207,15 @@ namespace Launcher.Tests
                 T.Eq(p.Evaluate(ids, "com.samsung.tv.csfs", "", false, 30.0, 19.8, 1.5), ForegroundAction.KillAndShow, "later exit back to Samsung Home is intercepted");
 
                 p.AllowHome(40.0);
+                T.Eq(p.Evaluate(ids, "com.samsung.tv.coba.newhome", "", false, 40.3, 39.8, 1.5), ForegroundAction.None, "intentional newhome stays open");
+                T.Eq(p.Evaluate(ids, "", "", false, 45.0, 39.8, 1.5), ForegroundAction.None, "exiting Home to Live TV / HDMI resets policy");
+                T.True(!p.Allowed, "guard re-armed after leaving Samsung Home to Live TV");
+
+                p.AllowHome(60.0);
+                T.Eq(p.Evaluate(ids, "", "", false, 71.0, 59.8, 1.5), ForegroundAction.None, "stale allow expires on Live TV too");
+                T.True(!p.Allowed, "guard re-armed after 10s without Home on Live TV");
+
+                p.AllowHome(80.0);
                 p.OnHomePressed();
                 T.True(!p.Allowed, "pressing Home re-arms guard");
             });
