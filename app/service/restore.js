@@ -41,7 +41,7 @@ var NOTES = [
 
 function wrap(s) { return 'echo ' + Buffer.from(s).toString('base64') + ' | base64 -d | sh'; }
 function out(r, what) {
-    if (!r || r.exit_code || r.timed_out) throw new Error((r && (r.stderr || r.stdout)) || what + ' failed');
+    if (!r || r.exit_code !== 0 || r.timed_out) throw new Error((r && (r.stderr || r.stdout)) || what + ' failed');
     return r.stdout || '';
 }
 // Resolves {value} or {error}: one unreadable source must not hide the others.

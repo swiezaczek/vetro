@@ -160,7 +160,7 @@ function read(execute, rows, options) {
             if (!complete) return;
             if (i > 0 && !inTime()) { complete = false; return; }
             return execute(wrap(manifestScript(batch)), 15000).then(function (r) {
-                if (!r || r.exit_code || r.timed_out) throw execError.failed(r, 'component facts unavailable');
+                if (!r || r.exit_code !== 0 || r.timed_out) throw execError.failed(r, 'component facts unavailable');
                 Object.assign(manifests, parseManifests(r.stdout));
             }).catch(function (e) { if (i === 0) throw e; complete = false; });
         });
@@ -179,7 +179,7 @@ function read(execute, rows, options) {
             return p.then(function () {
                 if (!inTime()) { complete = false; return; }
                 return execute(wrap(hashScript(batch)), 15000).then(function (h) {
-                    if (h && !h.exit_code && !h.timed_out) Object.assign(hashes, parseHashes(h.stdout));
+                    if (h && h.exit_code === 0 && !h.timed_out) Object.assign(hashes, parseHashes(h.stdout));
                 }, function () { /* no checksums for this batch; the manifests are still the section */ });
             });
         }, Promise.resolve());

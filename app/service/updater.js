@@ -80,7 +80,7 @@ function verifyBundle(raw, publicKey) {
     var signed;
     try {
         var v = crypto.createVerify('RSA-SHA256');
-        v.update(b.manifest);
+        v.update(b.manifest, 'utf8');
         signed = v.verify(publicKey, b.signature, 'base64');
     } catch (e) { signed = false; }
     if (!signed) throw fail('The update is not signed by the Vetro release key', 'bad-signature');

@@ -19,6 +19,19 @@ function probe(overrides) {
     for (const version of ['2.1.4', '3.0.1', '5.0.1']) assert.throws(() => preflight.detectRuntime(listing(version)), {code: 'runtime-unsupported'});
     assert.equal(preflight.detectRuntime(samsung, files('3.1.3')), '3.1');
     assert.equal(preflight.detectRuntime(samsung, files('6.0.1')), '6.0');
+    // Multi-clause capabilities and Node 4.4 absence of fs.constants must work cleanly.
+    const vm = require('vm');
+    const code = fs.readFileSync(path.join(__dirname, '..', 'service', 'root-preflight.js'), 'utf8');
+    const mod = { exports: {} };
+    vm.runInNewContext(code, {
+        module: mod,
+        exports: mod.exports,
+        require: id => id === 'fs' ? { R_OK: 4 } : require(id),
+        Promise, Error
+    });
+    assert.equal(mod.exports.detectRuntime(samsung, files('6.0.1')), '6.0');
+    assert.equal(preflight.effectiveCapabilities('/usr/bin/dotnet cap_setgid+ep cap_sys_admin+e\n', '/usr/bin/dotnet', ['cap_setgid', 'cap_sys_admin']), true);
+    assert.equal(preflight.effectiveCapabilities('/usr/bin/dotnet cap_setgid+ep cap_setgid=p\n', '/usr/bin/dotnet', ['cap_setgid']), false);
     assert.throws(() => preflight.detectRuntime(samsung, files('3.0.1')), {code: 'runtime-unsupported'});
     assert.throws(() => preflight.detectRuntime(samsung, files('not-a-version')), {code: 'runtime-probe-failed'});
     assert.throws(() => preflight.detectRuntime(samsung, {realpathSync: files('3.1.3').realpathSync, accessSync: () => {throw Error('unreadable CLR');}}), {code: 'runtime-probe-failed'});

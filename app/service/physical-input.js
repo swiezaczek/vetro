@@ -37,7 +37,7 @@ function Bridge(execute, onEvent) {
 }
 Bridge.prototype.inventory = function () {
     return this.execute('cat /proc/bus/input/devices',10000).then(function(r){
-        if (r.exit_code || r.timed_out) throw new Error('input inventory unavailable');
+        if (!r || r.exit_code !== 0 || r.timed_out) throw new Error('input inventory unavailable');
         return devices(r.stdout);
     });
 };
@@ -82,16 +82,16 @@ Bridge.prototype.start = function (device, mode, tokens) {
                     while((split=buffer.indexOf('\n'))>=0){
                         if(!active()||self.socket!==socket){socket.destroy();return;}
                         var line=buffer.slice(0,split);buffer=buffer.slice(split+1);var last=line.lastIndexOf('\t'), payload=line.slice(0,last), mac=line.slice(last+1);
-                        var expected=crypto.createHmac('sha256',secret).update(nonce).update(Buffer.from([0])).update(payload).digest();
+                        var expected=crypto.createHmac('sha256',secret).update(nonce).update(Buffer.from([0])).update(payload,'utf8').digest();
                         if(!MAC_HEX_RE.test(mac)||!crypto.timingSafeEqual(expected,Buffer.from(mac,'hex'))){fail(new Error('invalid input authentication'));return;}
                         var fields=payload.split('\t');
                         if(!authenticated){
-                            if(fields.length!==9||fields[0]!=='AUTH'||fields[2]!=='0'||fields[3]!=='0'||Buffer.from(fields[4],'base64').toString()!==selected.name||Buffer.from(fields[5],'base64').toString()!==selected.node||fields[8]!==mode){fail(new Error('unexpected input helper identity'));return;}
+                            if(fields.length!==9||fields[0]!=='AUTH'||fields[2]!=='0'||fields[3]!=='0'||Buffer.from(fields[4],'base64').toString('utf8')!==selected.name||Buffer.from(fields[5],'base64').toString('utf8')!==selected.node||fields[8]!==mode){fail(new Error('unexpected input helper identity'));return;}
                             authenticated=true;self.current.connected=true;clearTimeout(timer);settled=true;resolve(self.status());
                         }else{
                             try{
                                 if(fields.length!==3||fields[0]!=='EVENT'||+fields[1]!==seq+1)throw new Error('invalid input sequence');
-                                var event=JSON.parse(Buffer.from(fields[2],'base64').toString());
+                                var event=JSON.parse(Buffer.from(fields[2],'base64').toString('utf8'));
                                 if(event.type!==1||!Number.isInteger(event.code)||event.code<0||event.code>767||event.node!==selected.node||event.device!==selected.name||event.sequence!==+fields[1])throw new Error('invalid input event');
                                 seq=+fields[1];self.events.push(event);if(self.events.length>30)self.events.shift();
                                 self.onEvent(event);
@@ -110,7 +110,7 @@ Bridge.prototype.start = function (device, mode, tokens) {
                 var helper=path.join(__dirname,'..','payload','SamsungTvRemoteInputAgent.dll');
                 var args=['127.0.0.1',String(address.port),token,selected.name+'@'+selected.node,'evdev','TV',mode,mode==='filter'?tokens.join(','):''];
                 var command='umask 077; printf %s '+quote(secret.toString('base64'))+' > '+quote(token)+'; nohup /usr/bin/dotnet '+quote(helper)+' '+args.map(quote).join(' ')+' </dev/null >/tmp/vetro-input.log 2>&1 &';
-                self.execute(command,5000,active).then(function(r){if(r.exit_code||r.timed_out)fail(new Error('input helper launch failed'));}).catch(fail);
+                self.execute(command,5000,active).then(function(r){if(!r||r.exit_code!==0||r.timed_out)fail(new Error('input helper launch failed'));}).catch(fail);
             });
         });
     });

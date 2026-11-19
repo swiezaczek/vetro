@@ -163,7 +163,7 @@ function screenSummary() {
 
 // --- HTTP routing ---------------------------------------------------------
 function serveJson(res, obj, code) {
-    if (res.destroyed || res.writableEnded) return;
+    if (res.finished || res.destroyed || res.writableEnded) return;
     res.writeHead(code || 200, { 'content-type': 'application/json; charset=utf-8',
         'connection': code === 413 || code === 408 ? 'close' : 'keep-alive' });
     res.end(JSON.stringify(obj, null, 2) + '\n');
@@ -216,7 +216,7 @@ function downloadDiagnostics(res, withComponents) {
         serviceApis: serviceApiProbe
     }).finally(function () { diagnosticPending = null; });
     return diagnosticPending.then(function (report) {
-        if (res.destroyed || res.writableEnded) return;
+        if (res.finished || res.destroyed || res.writableEnded) return;
         res.setHeader('Content-Disposition', 'attachment; filename="vetro-diagnostics.json"');
         res.setHeader('Cache-Control', 'no-store');
         serveJson(res, report);

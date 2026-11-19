@@ -178,7 +178,7 @@ Dock.prototype.writeState = function (state) {
 };
 
 function check(r, what) {
-    if (!r || r.exit_code || r.timed_out) throw new Error((r && (r.stderr || r.stdout)) || what + ' failed');
+    if (!r || r.exit_code !== 0 || r.timed_out) throw new Error((r && (r.stderr || r.stdout)) || what + ' failed');
     return r.stdout || '';
 }
 

@@ -62,7 +62,7 @@ Monitor.prototype.snapshot=function(scope,force){var self=this;scope=scope||'ful
  return stream.refreshPending;
 }stream.cached=null;}if(stream.cached&&Date.now()-stream.cached.ts<2000)return Promise.resolve(stream.cached);if(stream.pending)return stream.pending;
 var withStorage=!this.storage||Date.now()-this.storageAt>=30000,cmd=LIGHT+(scope==='full'?'; '+DETAILS:'')+(withStorage?'; '+STORAGE:'');
-stream.pending=this.execute(cmd,15000).then(function(r){if(r.exit_code||r.timed_out)throw execError.failed(r,'snapshot unavailable');var result=parse(r.stdout,stream.previous,Date.now());if(!result.sample.cpu.cpu||!result.data.memory.totalBytes||(scope==='full'&&!result.data.processCount))throw execError.coded('incomplete','incomplete system snapshot');
+stream.pending=this.execute(cmd,15000).then(function(r){if(!r||r.exit_code!==0||r.timed_out)throw execError.failed(r,'snapshot unavailable');var result=parse(r.stdout,stream.previous,Date.now());if(!result.sample.cpu.cpu||!result.data.memory.totalBytes||(scope==='full'&&!result.data.processCount))throw execError.coded('incomplete','incomplete system snapshot');
  if(withStorage&&result.data.storage){self.storage=result.data.storage;self.storageAt=result.data.ts;}if(result.data.bootId&&self.storageBoot&&self.storageBoot!==result.data.bootId&&!withStorage){self.storage=null;self.storageAt=0;}self.storageBoot=result.data.bootId;
  result.data.storage=self.storage;result.data.storageTs=self.storage?self.storageAt:null;result.data.scope=scope;
  if(scope==='summary'){delete result.data.processes;delete result.data.processCount;}
@@ -86,11 +86,11 @@ Monitor.prototype.startup=function(options){var self=this,wait=options&&options.
  // Complete listings stay a minute; one without boot states is only kept briefly so the next call picks them up.
  if(this.units&&Date.now()-this.unitsAt<(this.unitsComplete?60000:3000))return Promise.resolve(this.units);
  if(this.unitsPending)return this.unitsPending;
- this.unitsPending=this.execute(UNITS_RUNNING,15000).then(function(r){if(r.exit_code||r.timed_out)throw execError.failed(r,'service inventory unavailable');
+ this.unitsPending=this.execute(UNITS_RUNNING,15000).then(function(r){if(!r||r.exit_code!==0||r.timed_out)throw execError.failed(r,'service inventory unavailable');
   var deadline=Date.now()+wait;
   function read(){
    // Without the boot states the listing is still useful: bootState stays null (unknown) instead of the whole section failing.
-   return self.execute(UNITS_READ,10000).then(function(f){return f.exit_code||f.timed_out?'':String(f.stdout||'');},function(){return '';}).then(function(out){
+   return self.execute(UNITS_READ,10000).then(function(f){return (!f||f.exit_code!==0||f.timed_out)?'':String(f.stdout||'');},function(){return '';}).then(function(out){
     var lines=out.split('\n'),m=UNITS_AGE_RE.exec(lines[0]||''),files=m?lines.slice(1).join('\n'):'';
     if(!files.trim()&&Date.now()<deadline)return sleep(3000).then(read);
     self.units=parseUnits(r.stdout+'\n__FILES__\n'+files);self.unitsAt=Date.now();self.unitsComplete=!!files.trim();return self.units;});

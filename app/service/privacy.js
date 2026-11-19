@@ -18,7 +18,7 @@ var PAIR_BIT_RE = /^[^:]+:[01]$/;
 var HDC = '/opt/usr/apps/org.tizen.homedatacontrol-service/data/data.db';
 
 function wrap(script) { return 'echo ' + Buffer.from(script).toString('base64') + ' | base64 -d | sh'; }
-function check(r) { if (r.exit_code || r.timed_out) throw execError.failed(r, r.stderr || r.stdout || 'Privacy state unavailable'); return r.stdout || ''; }
+function check(r) { if (!r || r.exit_code !== 0 || r.timed_out) throw execError.failed(r, (r && (r.stderr || r.stdout)) || 'Privacy state unavailable'); return r.stdout || ''; }
 function sections(text) {
     var out = {}, key = null;
     String(text || '').split('\n').forEach(function (l) {

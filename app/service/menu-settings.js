@@ -20,7 +20,7 @@ var DANGER = /(factory|aging|self.?test|internal.?pattern|panel.?mute|shop.?mode
 var TYPES = { integer: 'int', int32: 'int', uint32: 'int', int64: 'int', uint64: 'int', bool: 'bool', boolean: 'bool', string: 'string', double: 'double' };
 
 function wrap(s) { return 'echo ' + Buffer.from(s).toString('base64') + ' | base64 -d | sh'; }
-function check(r) { if (r.exit_code || r.timed_out) throw execError.failed(r, r.stderr || r.stdout || 'TV menu unavailable'); return r.stdout || ''; }
+function check(r) { if (!r || r.exit_code !== 0 || r.timed_out) throw execError.failed(r, (r && (r.stderr || r.stdout)) || 'TV menu unavailable'); return r.stdout || ''; }
 function shq(s) { return "'" + String(s).replace(QUOTE_RE, "'\\''") + "'"; }
 
 function parseMenu(text) {

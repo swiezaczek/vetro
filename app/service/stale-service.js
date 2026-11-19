@@ -21,7 +21,7 @@ function probeVersion(port, host, timeoutMs) {
     return new Promise(function (resolve) {
         var done = false;
         function finish(v) { if (!done) { done = true; resolve(v); } }
-        var req = http.get({host: host || '127.0.0.1', port: port, path: '/status', timeout: timeoutMs || 2000}, function (res) {
+        var req = http.get({host: host || '127.0.0.1', port: port, path: '/status'}, function (res) {
             var body = '';
             res.setEncoding('utf8');
             res.on('data', function (d) { if (body.length < 65536) body += d; });
@@ -36,7 +36,12 @@ function probeVersion(port, host, timeoutMs) {
             });
             res.on('error', function () { finish(null); });
         });
-        req.on('timeout', function () { req.destroy(); finish(null); });
+        req.setTimeout(timeoutMs || 2000);
+        req.on('timeout', function () {
+            if (typeof req.destroy === 'function') req.destroy();
+            else if (typeof req.abort === 'function') req.abort();
+            finish(null);
+        });
         req.on('error', function () { finish(null); });
     });
 }

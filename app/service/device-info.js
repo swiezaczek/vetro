@@ -39,7 +39,7 @@ function parse(text) {
 
 function read(execute) {
     return execute(wrap(script()), 5000).then(function (r) {
-        if (!r || r.exit_code || r.timed_out) throw execError.failed(r, 'device info unavailable');
+        if (!r || r.exit_code !== 0 || r.timed_out) throw execError.failed(r, 'device info unavailable');
         return parse(r.stdout);
     });
 }

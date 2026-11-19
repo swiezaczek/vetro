@@ -65,11 +65,11 @@ function parseIntrospect(text){var methods={},n=0,body=String(text||'');if(TABLE
 function inputSignature(args){return String(args||'').replace(SIGNATURE_COUNT_RE,'').replace(SIGNATURE_SPACE_RE,'');}
 // Compares an item with what this TV exposes; null when nothing was introspected.
 function confirm(x,probe){if(!probe||!probe.count)return null;var g=probe.methods[x.get],s=x.set&&probe.methods[x.set];if(!g||(x.set&&!s))return 'missing';if(g.input!==inputSignature(x.args)||(x.set&&s.input!==x.signature))return 'signature-mismatch';return 'confirmed';}
-function check(r){if(r.exit_code||r.timed_out)throw execError.failed(r,r.stderr||'TV read failed');return r.stdout;}
+function check(r){if(!r||r.exit_code!==0||r.timed_out)throw execError.failed(r,r&&r.stderr||'TV read failed');return r.stdout;}
 function Store(execute){this.execute=execute;this.busy=false;this.cached=null;this.pending=null;}
 // The method list only changes with firmware, so one successful introspection is kept; a failure is retried on the next read.
 Store.prototype.introspect=function(){var self=this;if(this.probe&&this.probe.count)return Promise.resolve(this.probe);
- function run(command,parse){return self.execute(command,8000).then(function(r){return r.exit_code||r.timed_out?{methods:{},count:0}:parse(r.stdout);},function(){return {methods:{},count:0};});}
+ function run(command,parse){return self.execute(command,8000).then(function(r){return !r||r.exit_code!==0||r.timed_out?{methods:{},count:0}:parse(r.stdout);},function(){return {methods:{},count:0};});}
  return run(INTROSPECT_XML,parseIntrospectXml).then(function(p){return p.count?p:run(INTROSPECT_TABLE,parseIntrospect);}).then(function(p){if(p.count)self.probe=p;return p;});};
 Store.prototype.read=function(){var self=this;if(this.cached&&Date.now()-this.cached.ts<2000)return Promise.resolve(this.cached);if(this.pending)return this.pending;
  var cmd=ITEMS.map(function(x){return 'echo __'+x.id+'__; '+PREFIX+x.get+' '+x.args;}).join('; ');
@@ -94,6 +94,6 @@ function networkDecode(output){
  var defaults=routes(sections.ROUTES),defaults6=routes(sections.ROUTES6),active=services.find(function(x){return defaults.some(function(r){return r.interface===x.interface})})||services.find(function(x){return x.state==='online'||x.state==='ready'})||null;
  return {source:'ConnMan + kernel interfaces and routes',services:services,interfaces:interfaces,active:active,defaultRoutes:defaults,defaultRoutes6:defaults6,configurationError:serviceError,writable:false,writeReason:'Network writes and connection recovery have not been tested'};
 }
-Store.prototype.readNetwork=function(){if(this.networkPending)return this.networkPending;var self=this;this.networkPending=this.execute('busctl --system --json=short call net.connman / net.connman.Manager GetServices; echo __LINKS__; ip -o link; echo __ADDR__; ip -o addr; echo __ROUTES__; ip route; echo __ROUTES6__; ip -6 route',10000).then(function(r){return networkDecode(check(r));}).finally(function(){self.networkPending=null;});return this.networkPending;};
+Store.prototype.readNetwork=function(){if(this.networkPending)return this.networkPending;var self=this;this.networkPending=this.execute('busctl --system --json=short call net.connman / net.connman.Manager GetServices; echo __LINKS__; ip -o link; echo __ADDR__; ip -o addr; echo __ROUTES__; ip route; echo __ROUTES6__; ip -6 route 2>/dev/null; true',10000).then(function(r){return networkDecode(check(r));}).finally(function(){self.networkPending=null;});return this.networkPending;};
 
 module.exports={Store:Store,ITEMS:ITEMS,decode:decode,parseIntrospect:parseIntrospect,parseIntrospectXml:parseIntrospectXml,networkDecode:networkDecode};

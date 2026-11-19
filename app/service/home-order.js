@@ -24,7 +24,7 @@ var MAX = 300;
 var ENTRY = /^[sd]\/[A-Za-z0-9_.]+@[^\s]+$/;
 
 function wrap(script) { return 'echo ' + Buffer.from(script).toString('base64') + ' | base64 -d | sh'; }
-function check(r) { if (r.exit_code || r.timed_out) throw Error(r.stderr || r.stdout || 'Home order unavailable'); return r.stdout || ''; }
+function check(r) { if (!r || r.exit_code !== 0 || r.timed_out) throw Error((r && (r.stderr || r.stdout)) || 'Home order unavailable'); return r.stdout || ''; }
 
 function parse(text) {
     var lines = String(text || '').replace(CR_RE, '').split('\n');
