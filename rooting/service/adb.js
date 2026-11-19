@@ -63,11 +63,13 @@ class Stream extends Duplex {
         this._remoteId = -1;
         this._queue = [];
         this._inFlight = null;
+        this._closed = false;
         this.once('open', () => this._flush());
     }
     localId() { return this._localId; }
     remoteId() { return this._remoteId; }
     _write(chunk, _enc, done) {
+        if (this._closed) { if (done) done(); return; }
         const limit = this._connection.maxPayload();
         if (chunk.length <= limit) {
             this._queue.push({ chunk, done });
@@ -93,6 +95,17 @@ class Stream extends Duplex {
         if (done) done();
         this._flush();
     }
+    _abortWrites() {
+        this._closed = true;
+        const inFlight = this._inFlight;
+        const queue = this._queue;
+        this._inFlight = null;
+        this._queue = [];
+        if (inFlight) inFlight();
+        for (let i = 0; i < queue.length; i++) {
+            if (queue[i].done) queue[i].done();
+        }
+    }
     _read() {}
     close() { this._connection._closeStream(this); }
 }
@@ -105,6 +118,7 @@ class Connection extends EventEmitter {
         this._streams = new Map();
         this._nextStreamId = 12345;
         this._handshakeDone = false;
+        this._closed = false;
         this._maxPayload = MAX_PAYLOAD;
         this._header = null;
         this._awaitingHeader = true;
@@ -142,6 +156,7 @@ class Connection extends EventEmitter {
     _fatal(code, msg) { this._socket.destroy(Object.assign(new Error(msg), { code })); }
     close() {
         this._streams.forEach((s) => this._closeStream(s));
+        this._closed = true;
         this._socket.removeAllListeners('readable');
         this._socket.on('data', () => {});
         this._socket.end();
@@ -150,16 +165,19 @@ class Connection extends EventEmitter {
         if (!this._streams.has(stream.localId())) return;
         this._streams.delete(stream.localId());
         if (this._handshakeDone) this._send(COMMANDS.CLSE, stream.localId(), stream.remoteId() === -1 ? 0 : stream.remoteId());
+        stream._abortWrites();
         stream.push(null);
         stream.end();
     }
     _abandon(cause) {
+        this._closed = true;
         if (this._streams.size === 0) return;
         const error = cause || Object.assign(new Error('sdbd closed'), { code: 'ESDBCLOSED' });
         const streams = Array.from(this._streams.values());
         this._streams.clear();
         streams.forEach((stream) => {
             if (stream.listenerCount('error') > 0) stream.emit('error', error);
+            stream._abortWrites();
             stream.push(null);
             stream.end();
         });
@@ -182,11 +200,12 @@ class Connection extends EventEmitter {
                 break;
             case COMMANDS.WRTE:
                 if (!stream) break;
-                stream.push(packet.data);
+                stream.push(packet.data || Buffer.alloc(0));
                 this._send(COMMANDS.OKAY, stream.localId(), stream.remoteId());
                 break;
             case COMMANDS.CLSE:
                 if (!stream) break;
+                stream._abortWrites();
                 stream.push(null);
                 stream.end();
                 this._streams.delete(packet.arg2);
@@ -197,13 +216,23 @@ class Connection extends EventEmitter {
         }
     }
     _send(command, arg1, arg2, payload) {
-        if (!this._connected) { this._socket.once('connect', () => this._send(command, arg1, arg2, payload)); return; }
+        if (this._closed || this._socket.destroyed) return;
+        if (!this._connected) {
+            this._socket.once('connect', () => {
+                if (!this._closed && !this._socket.destroyed) this._send(command, arg1, arg2, payload);
+            });
+            return;
+        }
         this._socket.write(encodePacket(command, arg1, arg2, payload));
     }
     createStream(service) {
+        if (this._closed) throw new Error('Connection closed');
         const stream = new Stream(this, this._nextStreamId++);
         this._streams.set(stream.localId(), stream);
-        const open = () => this._send(COMMANDS.OPEN, stream.localId(), 0, service);
+        const open = () => {
+            if (this._closed || !this._streams.has(stream.localId())) return;
+            this._send(COMMANDS.OPEN, stream.localId(), 0, service);
+        };
         if (this._handshakeDone) open();
         else this.once('connect', open);
         return stream;

@@ -233,13 +233,20 @@ Pool.prototype.clientHandshake = function (client, packet) {
 Pool.prototype.removeClient = function (client) {
     this.clients.delete(client);
     var self = this;
+    var removedIds = new Set();
     client.streams.forEach(function (upstreamId) {
+        removedIds.add(upstreamId);
         var stream = self.streams.get(upstreamId);
         self.streams.delete(upstreamId);
         if (stream && self.ready && self.socket && self.socket.writable) {
             self.socket.write(encode(CMD.CLSE, upstreamId, stream.remoteId < 0 ? 0 : stream.remoteId, null));
         }
     });
+    if (removedIds.size > 0 && this.queued.length > 0) {
+        this.queued = this.queued.filter(function (pkt) {
+            return pkt.length < 8 || !removedIds.has(pkt.readUInt32LE(4));
+        });
+    }
     client.streams.clear();
     this.scheduleIdle();
 };
@@ -335,7 +342,7 @@ Pool.prototype.onClientPacket = function (client, packet) {
             upstreamId = client.streams.get(packet.arg0);
             if (upstreamId === undefined) break;
             var stream = this.streams.get(upstreamId);
-            if (stream.pendingWrite) { client.socket.destroy(); break; }
+            if (!stream || stream.remoteId < 0 || stream.pendingWrite) { client.socket.destroy(); break; }
             stream.pendingWrite = {payload: packet.payload, offset: 0, remoteId: packet.arg1};
             this.writeFragment(upstreamId, stream);
             break;
@@ -358,14 +365,7 @@ Pool.prototype.onClientPacket = function (client, packet) {
 };
 
 Pool.prototype.close = function () {
-    this.cancelIdle();
-    var clients = this.clients;
-    this.clients = new Set();
-    clients.forEach(function (client) { client.streams.clear(); client.socket.destroy(); });
-    var socket = this.socket;
-    this.socket = null;
-    this.ready = false;
-    if (socket) { try { socket.destroy(); } catch (e) {} }
+    this.reset();
 };
 
 function TunnelServer(opts) {

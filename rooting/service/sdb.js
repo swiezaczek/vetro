@@ -2,7 +2,9 @@
 
 // Node 4.4 (Tizen 5.5 and older) cannot parse destructuring.
 const Connection = require('./adb.js').Connection;
+const StringDecoder = require('string_decoder').StringDecoder;
 const SDB_PORT = 26101;
+function noop() {}
 
 function SdbError(code, message) {
     const e = new Error(message);
@@ -63,20 +65,31 @@ function exec(client, command, options) {
 
         let output = '';
         let settled = false;
+        const decoder = new StringDecoder('utf8');
         const timer = setTimeout(() => finish(SdbError('sdbTimeout', 'timeout: ' + command), output), timeout);
 
         function finish(err, value) {
             if (settled) return;
             settled = true;
             clearTimeout(timer);
-            try { stream.removeAllListeners(); stream.close(); } catch (e) {}
+            try {
+                stream.removeListener('data', onData);
+                stream.removeListener('error', onError);
+                stream.removeListener('end', onEnd);
+                stream.removeListener('close', onEnd);
+                stream.on('error', noop);
+                stream.close();
+            } catch (e) {}
             if (err) reject(err); else resolve(value);
         }
         function onData(chunk) {
-            output += chunk.toString();
+            output += decoder.write(chunk);
             if (until && until(output)) finish(null, output);
         }
-        function onEnd() { finish(null, output); }
+        function onEnd() {
+            output += decoder.end();
+            finish(null, output);
+        }
         function onError(e) { finish(SdbError('sdbStreamError', String(e && e.message || e)), output); }
 
         stream.on('data', onData);
