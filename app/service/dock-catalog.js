@@ -55,6 +55,8 @@ var SYSTEM_ROWS = [
 // 2025 (CoBA) firmware: csfs is only the service; the Home that comes up on screen is started through this app,
 // which then spawns csfs, home.sidebar and home.media. When it is installed the pill starts it instead.
 var COBA_HOME = 'com.samsung.tv.coba.newhome';
+// 2022+ firmware without coba.newhome: csfs launches without UI while home.media opens the visible Home screen.
+var MEDIA_HOME = 'com.samsung.tv.home.media';
 
 function script() {
     var sizes = '224x224 304x304 152x152 104x104 icon';
@@ -71,6 +73,7 @@ function script() {
         '  if [ -f "$d$s.png" ]; then echo "I|$id|$d$s.png"; break; fi; done; done',
         'sqlite3 -readonly /opt/dbspace/.pkgmgr_parser.db "SELECT \'P|\'||hex(a.app_id)||\'|\'||hex(l.app_icon) FROM package_app_info a JOIN package_app_localized_info l ON l.app_id=a.app_id WHERE l.app_icon != \'\';" 2>/dev/null',
         '[ -d /usr/apps/' + COBA_HOME + ' ] || [ -d /opt/usr/apps/' + COBA_HOME + ' ] && echo "H|' + COBA_HOME + '"',
+        '[ -d /usr/apps/' + MEDIA_HOME + ' ] || [ -d /opt/usr/apps/' + MEDIA_HOME + ' ] && echo "H|' + MEDIA_HOME + '"',
         'true'
     ].join('\n');
 }
@@ -105,7 +108,9 @@ function parse(text) {
                 var icon = unhex(f[2]), id = unhex(f[1]);
                 if (iconOk(icon) && !out.packageIcons[id]) out.packageIcons[id] = icon;
             } else if (f[0] === 'H' && f.length === 2) {
-                if (f[1].trim() === COBA_HOME) out.homeApp = COBA_HOME;
+                var h = f[1].trim();
+                if (h === COBA_HOME) out.homeApp = COBA_HOME;
+                else if (h === MEDIA_HOME && !out.homeApp) out.homeApp = MEDIA_HOME;
             }
         } catch (e) { /* skip the line */ }
     });
@@ -220,8 +225,11 @@ function tsv(built) {
         lines.push(entryLine(e));
     });
     var system = SYSTEM_ROWS.map(function (row) {
-        // The CoBA home launcher first, Samsung's older home app as the fallback the dock already knows.
-        return built.homeApp ? row.replace('sys:com.samsung.tv.csfs', 'sys:' + built.homeApp + '\tcom.samsung.tv.csfs') : row;
+        // The CoBA home launcher first (closing any stale headless instance so its windows reopen),
+        // or 2022+ home.media, keeping Samsung's older csfs app as the fallback.
+        if (!built.homeApp) return row;
+        var target = 'sys:' + built.homeApp + '\tcom.samsung.tv.csfs' + (built.homeApp === COBA_HOME ? '\t\t' + COBA_HOME : '');
+        return row.replace('sys:com.samsung.tv.csfs', target);
     });
     return lines.concat(system).join('\n') + '\n';
 }
@@ -267,4 +275,4 @@ function load(execute, options) {
     });
 }
 
-module.exports = {sourceEntries: sourceEntries, inputsTsv: inputsTsv, iconPathOk: iconOk, COBALT_YOUTUBE: COBALT_YOUTUBE, load: load, parse: parse, build: build, tsv: tsv, script: script, slugify: slugify, cleanLabel: cleanLabel};
+module.exports = {sourceEntries: sourceEntries, inputsTsv: inputsTsv, iconPathOk: iconOk, COBALT_YOUTUBE: COBALT_YOUTUBE, COBA_HOME: COBA_HOME, MEDIA_HOME: MEDIA_HOME, load: load, parse: parse, build: build, tsv: tsv, script: script, slugify: slugify, cleanLabel: cleanLabel};
