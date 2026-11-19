@@ -1053,6 +1053,7 @@ namespace Launcher.Tests
                 var c = new Controller(layout);
                 c.Show();
                 var reader = new EvdevReader(16);
+                var filter = new EvdevFilter(new HashSet<int> { 63 }, 16);
                 var presses = new List<int>();
                 byte[] ev = Concat(Rec(16, 4, 4, 1), Rec(16, 1, 102, 1), Rec(16, 1, 102, 0), Rec(16, 0, 0, 0));
                 long sink = 0;
@@ -1073,6 +1074,8 @@ namespace Launcher.Tests
                         for (int i = 0; i < layout.Count; i++) { sink += layout.IconBox(i, fp, sc, slide).W; sink += (long)DockLayout.Amount(fp, i); }
                     }
                     presses.Clear(); reader.Feed(ev, ev.Length, presses); sink += presses.Count;
+                    int fOff = 0; EvdevEventAction fAct; ushort fCode;
+                    while (filter.Next(ev, ev.Length, ref fOff, out fAct, out fCode)) sink += (int)fAct + fCode;
                 };
                 for (int i = 0; i < 2000; i++) once();   // warm-up: JIT and first-use costs
                 long before = GC.GetAllocatedBytesForCurrentThread();

@@ -29,6 +29,11 @@ namespace Launcher
         private static readonly Efl.TaskCb IdleCb = OnIdle;
         private static readonly Efl.FdCb FifoCb = OnFifo;
         private static readonly Efl.FdCb InputCb = OnInput;
+        private static readonly Efl.FdCb GrabPipeCb = OnGrabPipe;
+        private static readonly Efl.FdCb InotifyCb = OnInotify;
+        private static readonly Efl.TaskCb InotifyRescanCb = OnInotifyRescan;
+        private static readonly Efl.TaskCb FocusRecoverCb = OnFocusRecover;
+        private static readonly Efl.VconfKeyChangedCb VconfCb = OnVconfChanged;
 
         private static string _dir, _logPath, _pidPath, _fifoPath;
         private static IntPtr _win, _anim, _idle, _fifoHandler;
@@ -66,6 +71,20 @@ namespace Launcher
         private static int _guardGen;
         private static string _guardFile;
         private static int _homeCode = -1;
+        private static HashSet<int> _homeCodes = new HashSet<int>();
+        private static InputGrabber _grabber;
+        private static IntPtr _grabPipeHandler, _inotifyHandler, _inotifyRescanTimer, _focusRecoverTimer;
+        private static int _inotifyFd = -1;
+        private static readonly byte[] GrabPipeReadBuf = new byte[128];
+        private static readonly byte[] GrabPipeBuf = new byte[256];
+        private static int _grabPipeCarry;
+        private static readonly byte[] InotifyBuf = new byte[1024];
+        private static readonly HomeForegroundPolicy _fgPolicy = new HomeForegroundPolicy();
+        private static double _lastVconfKill = -100;
+        private const double VconfKillCooldownSeconds = 0.35;
+        private const string XkbLayoutPath = "/usr/share/X11/xkb/tizen_key_layout.txt.tv";
+        private const string FullscreenAppKey = "memory/appfw/current_fullscreen_appid";
+        private const string PartialAppKey = "memory/appfw/current_partial_appid";
         // --home-launch APPID: the custom launcher mode. The Home key opens that app instead of the dock, and the dock
         // itself is never shown. Samsung's Home is NOT disabled in this mode (the TV's boot waits for it): the guard below is what keeps it away.
         // The id is checked as plain id characters (Catalog.ValidAppId) because it goes on a command line.
@@ -224,6 +243,8 @@ namespace Launcher
         {
             try
             {
+                if (_grabber != null) { _grabber.Dispose(); _grabber = null; }
+                if (_inotifyFd >= 0) { Libc.close(_inotifyFd); _inotifyFd = -1; }
                 int pid;
                 if (File.Exists(_pidPath) && int.TryParse(File.ReadAllText(_pidPath).Trim(), out pid)
                     && pid == Libc.getpid())
@@ -257,25 +278,123 @@ namespace Launcher
             string want = Arg(args, "--home-code") ?? Environment.GetEnvironmentVariable("TVLAUNCHER_HOME_CODE");
             if (want != null && int.TryParse(want, out code) && code > 0 && code < 768) _homeCode = code;
             _learn = Flag(args, "--learn");
-            if (_homeCode < 0 && !_learn) return;
+            string xkbText = null;
+            try { if (File.Exists(XkbLayoutPath)) xkbText = File.ReadAllText(XkbLayoutPath); } catch (Exception) { }
+            _homeCodes = HomeKeyMap.Parse(xkbText, _homeCode);
+            if (_homeCodes.Count == 0 && !_learn) return;
+
+            if (!Flag(args, "--no-grab") && !_learn && _homeCodes.Count > 0)
+            {
+                _grabber = new InputGrabber(_homeCodes, Log);
+                if (_grabber.Start())
+                {
+                    _grabPipeHandler = Efl.ecore_main_fd_handler_add(_grabber.EventReadFd, Efl.EcoreFdRead, GrabPipeCb, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
+                    if (_grabPipeHandler == IntPtr.Zero)
+                    {
+                        Log("grabber: cannot watch event pipe, falling back to passive evdev");
+                        _grabber.Dispose();
+                        _grabber = null;
+                    }
+                }
+                else
+                {
+                    _grabber.Dispose();
+                    _grabber = null;
+                }
+            }
 
             WatchNewNodes();
-            Log("home key code " + (_homeCode < 0 ? "not set" : _homeCode.ToString()) + (_learn ? ", learn mode (every key press is logged)" : ""));
-            // The remote's nodes come and go: it reconnects after standby, and Vetro creates its forwarding
-            // node some time after this process started. A node that appears later is picked up here.
+            SetupInotify();
+            Log("home key codes [" + (_homeCodes.Count == 0 ? "none" : string.Join(",", _homeCodes)) + "]"
+                + (_grabber != null ? ", exclusive Home grab active" : ", passive evdev")
+                + (_learn ? ", learn mode (every key press is logged)" : ""));
+            // Safety-net rescan alongside inotify: catches remotes already present or driver quirks.
             _rescanTimer = Efl.ecore_timer_add(RescanSeconds, RescanCb, IntPtr.Zero);
         }
 
-        /// <summary>Opens every remote node that is not being watched yet. Returns how many were added.</summary>
+        private static void SetupInotify()
+        {
+            try
+            {
+                int fd = Libc.inotify_init1(Libc.IN_NONBLOCK | Libc.O_CLOEXEC);
+                if (fd < 0) fd = Libc.inotify_init1(Libc.IN_NONBLOCK);
+                if (fd < 0) { Log("input: inotify unavailable errno=" + Marshal.GetLastWin32Error()); return; }
+                int wd = Libc.inotify_add_watch(fd, "/dev/input", Libc.IN_CREATE | Libc.IN_ATTRIB | Libc.IN_DELETE);
+                if (wd < 0) { Libc.close(fd); Log("input: inotify_add_watch failed errno=" + Marshal.GetLastWin32Error()); return; }
+                IntPtr h = Efl.ecore_main_fd_handler_add(fd, Efl.EcoreFdRead, InotifyCb, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
+                if (h == IntPtr.Zero) { Libc.close(fd); Log("input: cannot watch inotify fd"); return; }
+                _inotifyFd = fd;
+                _inotifyHandler = h;
+                Log("input: inotify watching /dev/input");
+            }
+            catch (Exception ex) { Log("input: inotify setup: " + ex.Message); }
+        }
+
+        private static byte OnInotify(IntPtr data, IntPtr handler)
+        {
+            try
+            {
+                while ((long)Libc.read(_inotifyFd, InotifyBuf, (UIntPtr)InotifyBuf.Length) > 0) { }
+                WatchNewNodes();
+                if (_inotifyRescanTimer == IntPtr.Zero)
+                    _inotifyRescanTimer = Efl.ecore_timer_add(0.15, InotifyRescanCb, IntPtr.Zero);
+            }
+            catch (Exception ex) { Log("input: inotify: " + ex.Message); }
+            return 1;
+        }
+
+        private static byte OnInotifyRescan(IntPtr data)
+        {
+            _inotifyRescanTimer = IntPtr.Zero;
+            try { WatchNewNodes(); } catch (Exception ex) { Log("input: inotify rescan: " + ex.Message); }
+            return 0;
+        }
+
+        private static string TryReadSysfsKeyMask(string node)
+        {
+            try
+            {
+                string name = Path.GetFileName(node);
+                if (string.IsNullOrEmpty(name)) return null;
+                string sysfs = "/sys/class/input/" + name + "/device/capabilities/key";
+                return File.Exists(sysfs) ? File.ReadAllText(sysfs) : null;
+            }
+            catch (Exception) { return null; }
+        }
+
+        /// <summary>Updates grabbed/passive remote nodes from /proc/bus/input/devices. Returns how many passive nodes were added.</summary>
         private static int WatchNewNodes()
         {
-            List<string> nodes;
-            try { nodes = InputDevices.RemoteNodes(File.ReadAllText("/proc/bus/input/devices")); }
+            List<InputDeviceInfo> all;
+            try { all = InputDevices.RemoteDevices(File.ReadAllText("/proc/bus/input/devices")); }
             catch (Exception ex) { if (!_listFailed) Log("input: cannot list devices: " + ex.Message); _listFailed = true; return 0; }
             _listFailed = false;
-            int added = 0;
-            foreach (string node in nodes)
+
+            var active = new List<InputDeviceInfo>(all.Count);
+            var activeByNode = new Dictionary<string, InputDeviceInfo>(StringComparer.Ordinal);
+            foreach (InputDeviceInfo d in all)
             {
+                if (!d.IsVetroForwarded && !InputDevices.HasAnyKeyCapability(TryReadSysfsKeyMask(d.Node))) continue;
+                active.Add(d);
+                activeByNode[d.Node] = d;
+            }
+
+            if (_grabber != null) _grabber.UpdateDevices(active);
+
+            for (int i = 0; i < _inputPaths.Count; i++)
+            {
+                string existing = _inputPaths[i];
+                if (existing == null) continue;
+                InputDeviceInfo info;
+                if (!activeByNode.TryGetValue(existing, out info) || (_grabber != null && !_grabber.ShouldWatchPassively(info)))
+                    DropNode(i);
+            }
+
+            int added = 0;
+            foreach (InputDeviceInfo d in active)
+            {
+                if (_grabber != null && !_grabber.ShouldWatchPassively(d)) continue;
+                string node = d.Node;
                 if (_inputPaths.Contains(node)) continue;
                 int fd = Libc.open(node, Libc.O_RDONLY | Libc.O_NONBLOCK);
                 if (fd < 0)
@@ -341,6 +460,29 @@ namespace Launcher
 
         // ------------------------------------------------------------------ show / hide
 
+        private static void RaiseAndActivate()
+        {
+            if (_win == IntPtr.Zero || !_ctl.IsActive) return;
+            Efl.evas_object_show(_win);
+            Efl.evas_object_raise(_win);
+            try { Efl.elm_win_raise(_win); } catch (Exception) { }
+            Efl.elm_win_activate(_win);
+        }
+
+        private static void ScheduleFocusRecovery()
+        {
+            if (_homeLaunch != null || !_ctl.IsActive) return;
+            if (_focusRecoverTimer != IntPtr.Zero) Efl.ecore_timer_del(_focusRecoverTimer);
+            _focusRecoverTimer = Efl.ecore_timer_add(0.25, FocusRecoverCb, IntPtr.Zero);
+        }
+
+        private static byte OnFocusRecover(IntPtr data)
+        {
+            _focusRecoverTimer = IntPtr.Zero;
+            try { RaiseAndActivate(); } catch (Exception ex) { Log("focus recover: " + ex.Message); }
+            return 0;
+        }
+
         private static void ShowDock()
         {
             if (_homeLaunch != null) return;   // custom launcher mode: nothing of ours is ever drawn
@@ -349,12 +491,11 @@ namespace Launcher
             CancelPendingKey();
             // A dock that was closed from the inputs panel opens on the apps again.
             if (_ctl != _appsCtl && !_ctl.IsActive) ActivatePage(_appsCtl, _appsDock);
-            if (!_ctl.Show()) { ResetIdle(); return; }
+            if (!_ctl.Show()) { RaiseAndActivate(); ResetIdle(); return; }
             // The page may have been put away while its objects were still opaque (a swap to the inputs panel): draw its
             // state for presence 0 before the window is mapped, or one frame can show it whole before the entrance starts.
             _dock.Apply(_ctl);
-            Efl.evas_object_show(_win);
-            Efl.elm_win_activate(_win);
+            RaiseAndActivate();
             StartClock();
             StartAnimator();
             ResetIdle();
@@ -618,6 +759,7 @@ namespace Launcher
                             double now = Efl.ecore_time_get();
                             if (now - _lastRawHome < HomeEchoSeconds) { Log("home echo ignored " + ((now - _lastRawHome) * 1000).ToString("0") + " ms after the press"); break; }
                             _lastHome = now;
+                            _fgPolicy.OnHomePressed();
                             HideDock();
                             // Home reached the dock through evas and not through evdev: the evdev path, which arms the guard,
                             // will count this press as already handled (_lastHome), so it is armed here.
@@ -644,15 +786,96 @@ namespace Launcher
                         Log("command " + c);
                         switch (c)
                         {
-                            case Command.Show: _perfWhy = "fifo-show"; ShowDock(); break;
+                            case Command.Show:
+                                _perfWhy = "fifo-show";
+                                _fgPolicy.OnHomePressed();
+                                if (_homeLaunch != null) { LaunchApp(_homeLaunch); ArmGuard(); } else ShowDock();
+                                break;
                             case Command.Hide: _perfWhy = "fifo-hide"; HideDock(); break;
-                            case Command.Toggle: _perfWhy = "fifo-toggle"; if (_ctl.IsActive) HideDock(); else ShowDock(); break;
+                            case Command.Toggle:
+                                _perfWhy = "fifo-toggle";
+                                _fgPolicy.OnHomePressed();
+                                if (_homeLaunch != null) { LaunchApp(_homeLaunch); ArmGuard(); }
+                                else if (_ctl.IsActive) HideDock();
+                                else ShowDock();
+                                break;
+                            case Command.Grab:
+                                if (_grabber != null) { _grabber.SetGrabWanted(true); WatchNewNodes(); Log("grabber: resumed"); }
+                                break;
+                            case Command.Ungrab:
+                                if (_grabber != null) { _grabber.SetGrabWanted(false); WatchNewNodes(); Log("grabber: paused for remapper"); }
+                                break;
                         }
                     }
                 }
             }
             catch (Exception ex) { Log("fifo: " + ex); }
             return 1;
+        }
+
+        private static byte OnGrabPipe(IntPtr data, IntPtr handler)
+        {
+            try
+            {
+                if (_grabber == null || _grabber.EventReadFd < 0) return 1;
+                for (int round = 0; round < 8; round++)
+                {
+                    int room = GrabPipeBuf.Length - _grabPipeCarry;
+                    if (room <= 0) { _grabPipeCarry = 0; room = GrabPipeBuf.Length; }
+                    long n = (long)Libc.read(_grabber.EventReadFd, GrabPipeReadBuf, (UIntPtr)Math.Min(room, GrabPipeReadBuf.Length));
+                    if (n <= 0) break;
+                    Buffer.BlockCopy(GrabPipeReadBuf, 0, GrabPipeBuf, _grabPipeCarry, (int)n);
+                    int total = _grabPipeCarry + (int)n;
+                    int pos = 0;
+                    while (pos + 4 <= total)
+                    {
+                        byte tag = GrabPipeBuf[pos];
+                        ushort code = (ushort)(GrabPipeBuf[pos + 1] | (GrabPipeBuf[pos + 2] << 8));
+                        pos += 4;
+                        if (tag == InputGrabber.TagHome)
+                        {
+                            if (_learn) Log("key code " + code + " (home grabbed)");
+                            HandleHomePress(true);
+                        }
+                        else if (tag == InputGrabber.TagNav)
+                        {
+                            if (_learn) Log("key code " + code);
+                            NavFromInput(code);
+                        }
+                        else if (tag == InputGrabber.TagRescan)
+                        {
+                            WatchNewNodes();
+                        }
+                    }
+                    _grabPipeCarry = total - pos;
+                    if (_grabPipeCarry > 0 && pos > 0) Buffer.BlockCopy(GrabPipeBuf, pos, GrabPipeBuf, 0, _grabPipeCarry);
+                }
+            }
+            catch (Exception ex) { Log("grab pipe: " + ex); }
+            return 1;
+        }
+
+        private static void HandleHomePress(bool fromGrab)
+        {
+            double now = Efl.ecore_time_get();
+            if (now - _lastHome < HomeDebounceSeconds) return;
+            _lastHome = now;
+            if (!fromGrab) _lastRawHome = now;
+            _fgPolicy.OnHomePressed();
+            _perfWhy = "home";
+            if (_homeLaunch != null)
+            {
+                LaunchApp(_homeLaunch);
+                if (!fromGrab) ArmGuard();
+                return;
+            }
+            if (_ctl.IsActive) HideDock();
+            else
+            {
+                ShowDock();
+                if (!fromGrab) ScheduleFocusRecovery();
+            }
+            if (!fromGrab) ArmGuard();
         }
 
         private static byte OnInput(IntPtr data, IntPtr handler)
@@ -672,16 +895,8 @@ namespace Launcher
                     {
                         int code = InputPresses[k];
                         if (_learn) Log("key code " + code);
-                        if (code != _homeCode) { NavFromInput(code); continue; }
-                        double now = Efl.ecore_time_get();
-                        // The focused dock also gets XF86Home through evas and hides itself: count it once.
-                        if (now - _lastHome < HomeDebounceSeconds) continue;
-                        _lastHome = now;
-                        _lastRawHome = now;
-                        _perfWhy = "home";
-                        if (_homeLaunch != null) { LaunchApp(_homeLaunch); ArmGuard(); continue; }
-                        if (_ctl.IsActive) HideDock(); else ShowDock();
-                        ArmGuard();
+                        if (_homeCodes.Contains(code)) { HandleHomePress(false); continue; }
+                        NavFromInput(code);
                     }
                 }
             }
@@ -689,15 +904,83 @@ namespace Launcher
             return 1;
         }
 
-        private static void ArmGuard()
+        private static void ArmGuard(bool immediate = false)
         {
             if (_guardApps == null) return;
             try
             {
                 NewGuardGeneration();
-                Libc.system(HomeGuard.Command(_guardApps, _guardFile, _guardGen));   // returns at once: the shell puts the whole chain in the background
+                string cmd = immediate
+                    ? HomeGuard.ImmediateCommand(_guardApps, _guardFile, _guardGen)
+                    : HomeGuard.Command(_guardApps, _guardFile, _guardGen);
+                Libc.system(cmd);   // returns at once: the shell puts the whole chain in the background
             }
             catch (Exception ex) { Log("guard: " + ex.Message); }
+        }
+
+        private static string TryGetVconfStr(string key)
+        {
+            IntPtr ptr = IntPtr.Zero;
+            try
+            {
+                ptr = Efl.vconf_get_str(key);
+                return ptr == IntPtr.Zero ? "" : (Marshal.PtrToStringAnsi(ptr) ?? "");
+            }
+            catch (Exception) { return ""; }
+            finally
+            {
+                if (ptr != IntPtr.Zero) Libc.free(ptr);
+            }
+        }
+
+        private static void SetupForegroundMonitor()
+        {
+            if (_guardApps == null) return;
+            try { Efl.ecore_main_loop_glib_integrate(); }
+            catch (Exception ex) { Log("glib integrate: " + ex.Message); }
+            try
+            {
+                int rc1 = Efl.vconf_notify_key_changed(FullscreenAppKey, VconfCb, IntPtr.Zero);
+                int rc2 = Efl.vconf_notify_key_changed(PartialAppKey, VconfCb, IntPtr.Zero);
+                Log("vconf: watching foreground app (rc=" + rc1 + "," + rc2 + ")");
+            }
+            catch (Exception ex) { Log("vconf watch: " + ex.Message); }
+            CheckForegroundHome(true);
+        }
+
+        private static void OnVconfChanged(IntPtr keynode, IntPtr userData)
+        {
+            try { CheckForegroundHome(false); }
+            catch (Exception ex) { Log("vconf cb: " + ex.Message); }
+        }
+
+        private static void CheckForegroundHome(bool startupOnlyKill)
+        {
+            if (_guardApps == null) return;
+            string fsApp = TryGetVconfStr(FullscreenAppKey);
+            string partialApp = TryGetVconfStr(PartialAppKey);
+            double now = Efl.ecore_time_get();
+            ForegroundAction act = _fgPolicy.Evaluate(_guardApps, fsApp, partialApp, _ctl.IsActive, now, _lastHome, HomeEchoSeconds);
+            if (act == ForegroundAction.None) return;
+
+            if (now - _lastVconfKill >= VconfKillCooldownSeconds)
+            {
+                _lastVconfKill = now;
+                Log("guard: unexpected Samsung Home (" + fsApp + " / " + partialApp + ") -> " + act);
+                ArmGuard(true);
+            }
+            if (startupOnlyKill) return;
+
+            if (act == ForegroundAction.KillAndRaise)
+            {
+                RaiseAndActivate();
+                ScheduleFocusRecovery();
+            }
+            else if (act == ForegroundAction.KillAndShow)
+            {
+                if (_homeLaunch != null) LaunchApp(_homeLaunch);
+                else { ShowDock(); ScheduleFocusRecovery(); }
+            }
         }
 
         /// <summary>Retires every kill that is still waiting: the guarded app was asked for on purpose.</summary>
@@ -736,7 +1019,11 @@ namespace Launcher
                 if (e.Panel == "inputs") OpenInputs(); else Log("unknown panel " + e.Panel);
                 return;
             }
-            if (HomeGuard.ShouldCancel(_guardApps, e.AppId)) CancelGuard();
+            if (HomeGuard.ShouldCancel(_guardApps, e.AppId))
+            {
+                _fgPolicy.AllowHome(Efl.ecore_time_get());
+                CancelGuard();
+            }
             HideDock();
             _pendingLaunch = e;
         }
@@ -815,15 +1102,21 @@ namespace Launcher
         {
             try
             {
+                if (HomeGuard.ShouldCancel(_guardApps, e.AppId))
+                {
+                    _fgPolicy.AllowHome(Efl.ecore_time_get());
+                    CancelGuard();
+                }
                 if (e.KillFirst != null && e.AppId != null)
                 {
                     // Close the other app first, then start this one: one detached shell, so the dock does not wait.
                     // Both ids are plain Tizen ids (Catalog.ValidAppId), safe on a command line.
-                    int rc = Libc.system("( /usr/bin/app_launcher -k " + e.KillFirst + "; sleep 0.4; /usr/bin/app_launcher -s " + e.AppId + " ) >/dev/null 2>&1 &");
+                    string startCmd = "/usr/bin/app_launcher -s " + e.AppId;
+                    if (e.FallbackAppId != null) startCmd += " || /usr/bin/app_launcher -s " + e.FallbackAppId;
+                    int rc = Libc.system("( /usr/bin/app_launcher -k " + e.KillFirst + "; sleep 0.4; " + startCmd + " ) >/dev/null 2>&1 &");
                     Log("launch " + e.AppId + " after closing " + e.KillFirst + " rc=" + rc);
                     return;
                 }
-                if (HomeGuard.ShouldCancel(_guardApps, e.AppId)) CancelGuard();
                 if (e.SystemApp || e.AppId == "com.samsung.tv.csfs")
                 {
                     // Samsung's Home ignores a plain app-control request from here (logged as launched, never shown);
@@ -989,6 +1282,7 @@ namespace Launcher
                     Log(_homeLaunch != null ? "home key launches " + homeLaunch + "; the dock is not shown" : "home-launch: bad app id ignored");
                 }
                 SetupInput(args);
+                SetupForegroundMonitor();
 
                 string fpsArg = Arg(args, "--vblank-fps");
                 int fps;
@@ -1010,6 +1304,7 @@ namespace Launcher
                 Log("elm_run");
                 Efl.elm_run();
                 Log("elm_run returned");
+                CleanupFiles();
                 Efl.elm_shutdown();
             }
             catch (Exception ex)

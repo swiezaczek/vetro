@@ -188,12 +188,14 @@ Animator, idle, clock (only when `Design.ShowClock`), pre-map, key repeat (`_key
 
 Two ways the user can press Home, and two guards against Samsung's own Home:
 
-| Path | Today (0.5.0) |
+| Path | Today (0.5.0+) |
 |---|---|
+| Exclusive Home grab (`InputGrabber`, `EVIOCGRAB` + `/dev/uinput`) | Physical remotes are grabbed on a dedicated poll thread; Home codes (from `--home-code` and `/usr/share/X11/xkb/tizen_key_layout.txt.tv`) are swallowed before Tizen sees them and delivered over a pipe to toggle the dock (or launch custom app); all other keys pass through to `vetro-dock-forwarded`. Yields (`ungrab`/`grab` FIFO commands) whenever Remapper runs and falls back to passive `O_RDONLY` if `/dev/uinput` or `EVIOCGRAB` is unavailable |
 | XF86Home reaches the dock (evas key) | `HandleKey` hides the dock and arms the guard (B15, fixed in this review) |
-| Home from evdev (the user app owns Home) | same function; a press that follows an evas one within 1.5 s is debounced, so the guard is armed once |
-| Guard | one process per Home press that kills Samsung Home at 0.15, 0.3, 0.45, 0.7, 1.2 s; every kill first checks the generation stored in `tvlauncher.guard` |
-| User launches Samsung Home (or another guarded target) from the dock | `CancelGuard()` bumps the generation (`LaunchApp`, `Activate`, `HomeGuard.ShouldCancel`), so the remaining kills of the chain do nothing; covers several app ids and the CoBA fallback |
+| Home from passive evdev (grab paused/unavailable or Remapper active) | same function; a press that follows an evas one within 1.5 s is debounced, so the guard is armed once, and focus recovery re-raises the dock window |
+| Foreground `vconf` monitor (`HomeForegroundPolicy`) | Watches `current_fullscreen_appid` and `current_partial_appid`: closes unexpected Samsung Home windows (app exit, standby wake, SmartThings Home) immediately (`ImmediateCommand`) and shows Vetro unless Samsung Home was deliberately selected (`AllowHome`), which re-arms as soon as the user opens another app or presses Home |
+| Guard | one process per Home press that kills `csfs`, `home.sidebar`, `home.media`, `coba.newhome` and `coba.home` at 0.15, 0.3, 0.45, 0.7, 1.2 s (plus immediate at t=0 from `vconf`); every kill first checks the generation stored in `tvlauncher.guard` |
+| User launches Samsung Home (or another guarded target) from the dock | `AllowHome` + `CancelGuard()` bumps the generation (`LaunchApp`, `Activate`, `HomeGuard.ShouldCancel`), so the remaining kills of the chain do nothing and `vconf` leaves Samsung Home open until another app opens or Home is pressed |
 
 - **B14** After a Home press armed the kill chain, launching Samsung's own Home from the dock was still killed by the remaining steps. In 0.5.0 this is already covered, by a generation counter in `tvlauncher.guard` instead of the cancel file the 0.4.0 tree used (real-shell test "multi-app Home guard…" in `dock/tests/Program.cs`). Nothing was ported.
 - **B15** A Home key that reached the dock through evas (not evdev) never armed the guard, so Samsung Home came up over the dock. Fixed: `OnKey` XF86Home arms it.

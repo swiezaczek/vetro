@@ -45,8 +45,9 @@ var DLL = 'tvlauncher-dotnet.dll';
 var UNIT = 'vetro-dock';                              // the dock's own systemd unit
 var HOME_APP = 'com.samsung.tv.csfs';
 // 2025 (RSM/CoBA) firmware runs the sidebar and media rows as separate processes that stay on top of the dock
-// when only csfs is closed, so the guard and the enable-time kill target all three.
-var HOME_KILL = [HOME_APP, 'com.samsung.tv.home.sidebar', 'com.samsung.tv.home.media'];
+// when only csfs is closed, and uses com.samsung.tv.coba.newhome / coba.home as the Home launcher, so the guard
+// and the launch-time kill target all of them.
+var HOME_KILL = [HOME_APP, 'com.samsung.tv.home.sidebar', 'com.samsung.tv.home.media', 'com.samsung.tv.coba.newhome', 'com.samsung.tv.coba.home'];
 var AUTORUN_KEY = 'db/menu/smart_hub/ontvsetting/auto_start';   // Samsung's "Autorun Smart Hub"
 var HOME_CODE = 63;                                   // Home on the forwarded remote Vetro creates
 var START_WAIT_MS = 15000;
@@ -101,6 +102,7 @@ function Dock(options) {
     this.lastError = null;
     this.lastCatalog = null;
     this.refreshPending = false;
+    this.grabPaused = false;
 }
 
 Dock.prototype.installed = function () {
@@ -242,7 +244,8 @@ Dock.prototype.startScript = function () {
     // Custom mode: headless. The one-line list only gives the process something to load; the window is never shown.
     var args = DLL + ' --apps ' + q(state.customApp ? this.customAppsFile : this.appsFile) + ' --inputs ' + q(this.inputListPath()) +
         ' --hidden' + (state.customApp ? ' --no-premap --no-warmup --home-launch ' + state.customApp : '') +
-        ' --home-code ' + HOME_CODE + ' --kill-on-home ' + HOME_KILL.join(',') + (state.noMotion && !state.customApp ? ' --no-motion' : '');
+        ' --home-code ' + HOME_CODE + ' --kill-on-home ' + HOME_KILL.join(',') +
+        (state.noMotion && !state.customApp ? ' --no-motion' : '') + (this.grabPaused ? ' --no-grab' : '');
     return [
         this.stopLines(),
         'rm -f ' + FIFO,
@@ -329,7 +332,7 @@ Dock.prototype.enable = function () {
     }).then(function () {
         // Samsung's Home is idle in the background; closing it frees its memory, and Settings or
         // Source opened from the dock start it again on demand.
-        return self.execute(HOME_KILL.map(function (id) { return 'app_launcher -k ' + id; }).join('; '), 8000).catch(function () {});
+        return self.killSamsungHome();
     }).then(function () { return self.status(); }).catch(function (e) {
         self.lastError = e.message;
         return self.stopDock().catch(function () {}).then(function () { throw e; });
@@ -432,7 +435,7 @@ Dock.prototype.enableCustom = function (appId) {
     }).then(function () {
         if (changing) return null;
         // Samsung's Home is idle in the background; closing it frees its memory and clears the screen for the app.
-        return self.execute(HOME_KILL.map(function (id) { return 'app_launcher -k ' + id; }).join('; '), 8000).catch(function () {});
+        return self.killSamsungHome();
     }).then(function () { return self.status(); }).catch(function (e) {
         self.lastError = e.message;
         return self.undoCustomStart(before).then(function () { throw e; });
@@ -580,6 +583,28 @@ Dock.prototype.iconFile = function (slug) {
     return null;
 };
 
+Dock.prototype.killSamsungHome = function () {
+    return this.execute(HOME_KILL.map(function (id) { return 'app_launcher -k ' + id; }).join('; '), 8000).catch(function () {});
+};
+
+Dock.prototype.sendFifo = function (word) {
+    var fd = -1;
+    try {
+        var flags = ((fs.constants && typeof fs.constants.O_WRONLY === 'number') ? fs.constants.O_WRONLY : 1) |
+            ((fs.constants && typeof fs.constants.O_NONBLOCK === 'number') ? fs.constants.O_NONBLOCK : 2048);
+        fd = fs.openSync(FIFO, flags);
+        fs.writeSync(fd, Buffer.from(String(word) + '\n'));
+    } catch (e) { /* dock may not be running */ }
+    finally { if (fd >= 0) try { fs.closeSync(fd); } catch (e2) {} }
+};
+
+Dock.prototype.setGrabPaused = function (paused) {
+    var next = !!paused;
+    if (this.grabPaused === next) return;
+    this.grabPaused = next;
+    this.sendFifo(next ? 'ungrab' : 'grab');
+};
+
 // Called every few seconds by the service, and at once when the root agent connects. Starts the
 // dock after a boot or a crash while it is switched on. It never switches the setting off: a slow
 // boot must not cost the user the launcher for good, so after repeated failures it keeps trying
@@ -591,7 +616,10 @@ Dock.prototype.supervise = function (agentConnected) {
     this.busy = true;
     return this.healHome(state).then(function () { return self.probe(); }).then(function (p) {
         if (p.running) { self.failures = 0; self.refreshCatalogLater(); return 'running'; }
-        return self.launch(true).then(function () { self.failures = 0; self.lastError = null; self.refreshCatalogLater(); return 'started'; });
+        return self.launch(true).then(function () {
+            self.failures = 0; self.lastError = null; self.refreshCatalogLater();
+            return self.killSamsungHome().then(function () { return 'started'; });
+        });
     }).then(function (result) {
         return custom ? self.checkCustomApp(state.customApp).then(function (gone) { return gone || result; }) : result;
     }).catch(function (e) {

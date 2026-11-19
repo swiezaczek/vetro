@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Text;
 using Launcher.Core;
 
 namespace Launcher.Tests
@@ -126,6 +128,95 @@ namespace Launcher.Tests
                     Shell(command + " wait"); T.Eq(File.ReadAllLines(log).Length, 1, "success does not start two Homes");
                 }
                 finally { Directory.Delete(dir, true); }
+            });
+
+            T.Run("home key map and evdev filter: exclusive Home interception and clean release", () =>
+            {
+                var codes = HomeKeyMap.Parse("# xkb\nXF86Back 1\nXF86Home 63\nXF86Home 172\n", 63);
+                T.Eq(codes.Count, 2, "XF86Home codes deduplicated");
+                T.True(codes.Contains(63) && codes.Contains(172) && !codes.Contains(1), "only Home codes collected");
+                T.True(HomeKeyMap.Parse(null, 63).Contains(63), "extraCode kept without layout file");
+
+                var filter = new EvdevFilter(codes, 16);
+                byte[] ev = new byte[16 * 6];
+                Action<int, int, int, int> put = (slot, type, code, val) =>
+                {
+                    int o = slot * 16 + 8;
+                    ev[o] = (byte)type; ev[o + 1] = (byte)(type >> 8);
+                    ev[o + 2] = (byte)code; ev[o + 3] = (byte)(code >> 8);
+                    ev[o + 4] = (byte)val; ev[o + 5] = (byte)(val >> 8); ev[o + 6] = (byte)(val >> 16); ev[o + 7] = (byte)(val >> 24);
+                };
+                put(0, 1, 63, 1);    // Home down -> HomePress (swallowed)
+                put(1, 1, 63, 2);    // Home repeat -> Suppress
+                put(2, 1, 63, 0);    // Home up -> Suppress
+                put(3, 1, 106, 1);   // Right down -> ForwardAndNotify
+                put(4, 0, 0, 0);     // EV_SYN -> Forward
+                put(5, 1, 105, 1);   // Left down (left held) -> ForwardAndNotify
+                int off = 0;
+                EvdevEventAction act; ushort keyCode;
+                T.True(filter.Next(ev, ev.Length, ref off, out act, out keyCode) && act == EvdevEventAction.HomePress && keyCode == 63, "Home press triggers dock");
+                T.True(filter.Next(ev, ev.Length, ref off, out act, out keyCode) && act == EvdevEventAction.Suppress, "Home repeat suppressed");
+                T.True(filter.Next(ev, ev.Length, ref off, out act, out keyCode) && act == EvdevEventAction.Suppress, "Home release suppressed");
+                T.True(filter.Next(ev, ev.Length, ref off, out act, out keyCode) && act == EvdevEventAction.ForwardAndNotify && keyCode == 106, "Right forwarded and notified");
+                T.True(filter.Next(ev, ev.Length, ref off, out act, out keyCode) && act == EvdevEventAction.Forward, "sync forwarded");
+                T.True(filter.Next(ev, ev.Length, ref off, out act, out keyCode) && act == EvdevEventAction.ForwardAndNotify && keyCode == 105, "Left forwarded and tracked");
+                T.True(!filter.Next(ev, ev.Length, ref off, out act, out keyCode), "stream exhausted");
+                ushort[] held = filter.DrainPressedForwarded();
+                T.Eq(held.Length, 2, "two forwarded keys still pressed, Home not among them");
+                T.Eq(filter.DrainPressedForwarded().Length, 0, "drain clears pressed set");
+            });
+
+            T.Run("device capability bitmasks and forwarded Phys filtering", () =>
+            {
+                T.True(InputDevices.HasAnyKeyCapability(null), "missing sysfs tolerated");
+                T.True(!InputDevices.HasAnyKeyCapability("0 0"), "all-zero dummy subdevice rejected");
+                T.True(InputDevices.HasAnyKeyCapability("1 0"), "non-zero mask accepted");
+                T.True(InputDevices.HasKeyBit("80000000 0", 63, 32), "32-bit kernel bit 63");
+                T.True(!InputDevices.HasKeyBit("80000000 0", 62, 32), "32-bit kernel bit 62 unset");
+                T.True(InputDevices.HasKeyBit("8000000000000000", 63, 64), "64-bit kernel bit 63");
+
+                string text =
+                    "I: Bus=0005 Vendor=04e8 Product=1234 Version=0100\nN: Name=\"Smart Control\"\nP: Phys=\nH: Handlers=kbd event4\n\n" +
+                    "I: Bus=0006 Vendor=04e8 Product=1234 Version=0100\nN: Name=\"Smart Control\"\nP: Phys=vetro-dock-forwarded\nH: Handlers=kbd event21\n\n" +
+                    "I: Bus=0006 Vendor=04e8 Product=1234 Version=0100\nN: Name=\"Smart Control\"\nP: Phys=vetro-forwarded-remote\nH: Handlers=kbd event20\n";
+                var devs = InputDevices.RemoteDevices(text);
+                T.Eq(devs.Count, 2, "dock's own uinput skipped, remapper uinput kept");
+                T.Eq(devs[0].Node, "/dev/input/event4", "physical remote");
+                T.True(!devs[0].IsVetroForwarded && devs[0].Bus == 5 && devs[0].Vendor == 0x04e8, "identity parsed");
+                T.Eq(devs[1].Node, "/dev/input/event20", "remapper forwarded device");
+                T.True(devs[1].IsVetroForwarded, "marked as remapper forwarded");
+            });
+
+            T.Run("foreground policy: kills unexpected Home, respects user Samsung Home choice", () =>
+            {
+                string[] ids = HomeGuard.Parse("com.samsung.tv.csfs,com.samsung.tv.home.sidebar,com.samsung.tv.home.media,com.samsung.tv.coba.newhome,com.samsung.tv.coba.home");
+                T.True(HomeGuard.ShouldCancel(ids, "com.samsung.tv.coba.home"), "coba.home recognised");
+                var p = new HomeForegroundPolicy();
+                T.Eq(p.Evaluate(ids, "org.tizen.netflix-app", "", false, 10.0, -100.0, 1.5), ForegroundAction.None, "normal app ignored");
+                T.Eq(p.Evaluate(ids, "com.samsung.tv.csfs", "", false, 10.0, -100.0, 1.5), ForegroundAction.KillAndShow, "unexpected fullscreen Home kills and shows dock");
+                T.Eq(p.Evaluate(ids, "com.samsung.tv.coba.newhome", "", false, 10.5, 10.0, 1.5), ForegroundAction.KillOnly, "Home during hide echo kills without reopening");
+                T.Eq(p.Evaluate(ids, "com.samsung.tv.csfs", "", true, 10.5, 10.0, 1.5), ForegroundAction.KillAndRaise, "Home over active dock kills and raises dock");
+                T.Eq(p.Evaluate(ids, "org.tizen.tv-viewer", "com.samsung.tv.home.sidebar", false, 12.0, 5.0, 1.5), ForegroundAction.KillOnly, "partial sidebar killed without forcing dock open");
+
+                p.AllowHome(20.0);
+                T.Eq(p.Evaluate(ids, "org.tizen.netflix-app", "", false, 20.1, 19.8, 1.5), ForegroundAction.None, "stale previous app does not cancel intentional Home");
+                T.Eq(p.Evaluate(ids, "com.samsung.tv.csfs", "", false, 20.3, 19.8, 1.5), ForegroundAction.None, "intentional Samsung Home stays open");
+                T.Eq(p.Evaluate(ids, "org.tizen.netflix-app", "", false, 25.0, 19.8, 1.5), ForegroundAction.None, "opening another app re-arms guard");
+                T.True(!p.Allowed, "guard re-armed after leaving Samsung Home");
+                T.Eq(p.Evaluate(ids, "com.samsung.tv.csfs", "", false, 30.0, 19.8, 1.5), ForegroundAction.KillAndShow, "later exit back to Samsung Home is intercepted");
+
+                p.AllowHome(40.0);
+                p.OnHomePressed();
+                T.True(!p.Allowed, "pressing Home re-arms guard");
+            });
+
+            T.Run("commands: grab and ungrab", () =>
+            {
+                var buf = new CommandBuffer();
+                var cmds = buf.Feed(Encoding.ASCII.GetBytes("ungrab\ngrab\n"), 12);
+                T.Eq(cmds.Count, 2, "two commands");
+                T.Eq(cmds[0], Command.Ungrab, "ungrab");
+                T.Eq(cmds[1], Command.Grab, "grab");
             });
         }
     }

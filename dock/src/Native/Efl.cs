@@ -29,6 +29,7 @@ namespace Launcher.Native
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)] public delegate byte TaskCb(IntPtr data);
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)] public delegate byte FdCb(IntPtr data, IntPtr handler);
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)] public delegate void EvasCb(IntPtr data, IntPtr evas, IntPtr obj, IntPtr eventInfo);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)] public delegate void VconfKeyChangedCb(IntPtr keynode, IntPtr userData);
 
         // --- elementary ---
         [DllImport(Elm)] public static extern int elm_init(int argc, IntPtr argv);
@@ -43,6 +44,7 @@ namespace Launcher.Native
         [DllImport(Elm)] public static extern void elm_win_layer_set(IntPtr win, int layer);
         [DllImport(Elm)] public static extern int elm_win_aux_hint_add(IntPtr win, string hint, string val);
         [DllImport(Elm)] public static extern void elm_win_activate(IntPtr win);
+        [DllImport(Elm)] public static extern void elm_win_raise(IntPtr win);
         [DllImport(Elm)] public static extern void elm_win_screen_size_get(IntPtr win, out int x, out int y, out int w, out int h);
 
         // --- evas: generic objects ---
@@ -51,6 +53,7 @@ namespace Launcher.Native
         [DllImport(Evas)] public static extern void evas_object_resize(IntPtr obj, int w, int h);
         [DllImport(Evas)] public static extern void evas_object_show(IntPtr obj);
         [DllImport(Evas)] public static extern void evas_object_hide(IntPtr obj);
+        [DllImport(Evas)] public static extern void evas_object_raise(IntPtr obj);
         [DllImport(Evas)] public static extern void evas_object_color_set(IntPtr obj, int r, int g, int b, int a);
         [DllImport(Evas)] public static extern void evas_object_clip_set(IntPtr obj, IntPtr clip);
         [DllImport(Evas)] public static extern void evas_object_event_callback_add(IntPtr obj, int type, EvasCb cb, IntPtr data);
@@ -97,6 +100,7 @@ namespace Launcher.Native
         [DllImport(Ecore)] public static extern IntPtr ecore_timer_del(IntPtr timer);
         [DllImport(Ecore)] public static extern IntPtr ecore_main_fd_handler_add(int fd, int flags, FdCb func, IntPtr data, IntPtr bufFunc, IntPtr bufData);
         [DllImport(Ecore)] public static extern IntPtr ecore_main_fd_handler_del(IntPtr handler);
+        [DllImport(Ecore)] [return: MarshalAs(UnmanagedType.U1)] public static extern bool ecore_main_loop_glib_integrate();
 
         // --- diagnostics ---
         [DllImport(EcoreEvas)] public static extern IntPtr ecore_evas_ecore_evas_get(IntPtr evas);
@@ -110,6 +114,9 @@ namespace Launcher.Native
         [DllImport(AppControl)] public static extern int app_control_destroy(IntPtr ac);
         [DllImport(AppControl)] public static extern int app_control_add_extra_data(IntPtr ac, string key, string value);
         [DllImport("libvconf.so.0")] public static extern int vconf_get_int(string key, out int value);
+        [DllImport("libvconf.so.0")] public static extern IntPtr vconf_get_str(string key);
+        [DllImport("libvconf.so.0")] public static extern int vconf_notify_key_changed(string key, VconfKeyChangedCb cb, IntPtr userData);
+        [DllImport("libvconf.so.0")] public static extern int vconf_ignore_key_changed(string key, VconfKeyChangedCb cb);
         /// <summary>Read-only: the app the TV treats as Home for the "main" operation (what the Home key launches).</summary>
         [DllImport("libcapi-appfw-app-operation-tv.so.0")] public static extern int app_operation_get_current_app(string operation, out IntPtr appId);
 

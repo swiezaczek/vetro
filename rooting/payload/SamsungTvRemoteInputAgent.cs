@@ -40,8 +40,9 @@ internal static class SamsungTvRemoteInputAgent
     private const uint UiDeviceDestroy = 0x00005502;
     private const uint UiSetPhysical32 = 0x4004556c;
     private const uint UiSetPhysical64 = 0x4008556c;
-    // Marks Vetro's own forwarding device; must match FORWARDED_PHYS in app/service/physical-input.js.
+    // Marks Vetro's own forwarding devices; must match physical-input.js and Evdev.cs.
     private const string ForwardedPhys = "vetro-forwarded-remote";
+    private const string DockForwardedPhys = "vetro-dock-forwarded";
     private const int UinputUserDeviceSize = 1116;
     private const int UinputNameBytes = 80;
 
@@ -712,9 +713,13 @@ internal static class SamsungTvRemoteInputAgent
                 continue;
             }
             Match physMatch = Regex.Match(block, "P: Phys=(.*)");
-            if (physMatch.Success && physMatch.Groups[1].Value.Trim() == ForwardedPhys)
+            if (physMatch.Success)
             {
-                continue;
+                string phys = physMatch.Groups[1].Value.Trim();
+                if (phys == ForwardedPhys || phys == DockForwardedPhys)
+                {
+                    continue;
+                }
             }
             Match eventMatch = Regex.Match(block, "\\bevent[0-9]+\\b");
             if (!eventMatch.Success)

@@ -45,7 +45,7 @@ function fixture(options) {
     assert.equal(s.customApp, 'com.example.launcher');
     assert.deepEqual(f.tv.homeCalls, [], 'Samsung Home is never disabled, restored or even read by the mode');
     assert.equal(f.dock.readState().customHomeDisabled, false);
-    assert.ok(/--home-launch com\.example\.launcher/.test(f.tv.started) && /--kill-on-home com\.samsung\.tv\.csfs,com\.samsung\.tv\.home\.sidebar,com\.samsung\.tv\.home\.media/.test(f.tv.started),
+    assert.ok(/--home-launch com\.example\.launcher/.test(f.tv.started) && /--kill-on-home com\.samsung\.tv\.csfs,com\.samsung\.tv\.home\.sidebar,com\.samsung\.tv\.home\.media,com\.samsung\.tv\.coba\.newhome,com\.samsung\.tv\.coba\.home/.test(f.tv.started),
         'the guard that closes Samsung Home after each press is on: ' + f.tv.started);
     assert.equal(f.tv.autorun, 0, 'the TV does not power on into Samsung Home');
     assert.equal(f.tv.csfsKilled, true, 'Samsung Home is closed once');
@@ -55,6 +55,11 @@ function fixture(options) {
     s = await f.dock.enableCustom('com.example.other');
     assert.equal(s.customApp, 'com.example.other');
     assert.deepEqual(f.tv.homeCalls, []);
+
+    // On boot supervision starts headless dock and closes Samsung Home.
+    f.tv.running = false; f.tv.csfsKilled = false;
+    assert.equal(await f.dock.supervise(true), 'started');
+    assert.equal(f.tv.csfsKilled, true, 'supervise closes Samsung Home in custom mode too');
 
     // Off: no Samsung Home work either, autorun is put back.
     s = await f.dock.disableCustom();

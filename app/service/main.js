@@ -739,7 +739,7 @@ var INPUT_FAULT_PAUSE_MS=60000, inputFaultUntil=0;
 // Listening pauses interception until the user stops it. A page that was closed or navigated away while listening never says so:
 // when nothing has asked about the input for this long, the pause is dropped and the saved shortcuts work again.
 var INPUT_LISTEN_IDLE_MS=300000, inputSeenAt=Date.now();
-function pauseInputFault(message){inputError=message;inputFaultUntil=Date.now()+INPUT_FAULT_PAUSE_MS;physical.stop();}
+function pauseInputFault(message){inputError=message;inputFaultUntil=Date.now()+INPUT_FAULT_PAUSE_MS;physical.stop();dock.setGrabPaused(false);}
 var inputLifecycleActive=true, inputGeneration=0;
 function startInputLifecycle(){inputLifecycleActive=true;}
 function stopInputLifecycle(){inputLifecycleActive=false;stopInput();}
@@ -765,10 +765,11 @@ function restoreInput(){
         // Several interfaces share the name: the one that advertises keys, and if more than one does, the saved node among them.
         var device=candidates.length===1?candidates[0]:keyed.length===1?keyed[0]:keyed.find(function(d){return d.node===preference.node;})||null;
         if(!device)throw new Error('Saved physical remote is unavailable');
+        dock.setGrabPaused(true);
         return physical.start(device.node,'filter',inputTokens());
-    }).then(function(){if(generation===inputGeneration)inputError=null;}).catch(function(e){if(generation===inputGeneration)inputError=e.message;}).finally(function(){if(generation===inputGeneration)inputRestoring=false;});
+    }).then(function(){if(generation===inputGeneration)inputError=null;}).catch(function(e){if(generation===inputGeneration){inputError=e.message;dock.setGrabPaused(false);}}).finally(function(){if(generation===inputGeneration)inputRestoring=false;});
 }
-function stopInput(){++inputGeneration;inputRestoring=false;inputObservers.forEach(function(b){b.stop();});inputObservers=[];physical.stop();}
+function stopInput(keepGrabPaused){++inputGeneration;inputRestoring=false;inputObservers.forEach(function(b){b.stop();});inputObservers=[];physical.stop();if(!keepGrabPaused)dock.setGrabPaused(false);}
 function inputSnapshot(){
     if(!inputObservers.length)return Object.assign({},physical.status(),{preference:inputPreference()});
     var events=[],connected=false,errors=[];
@@ -790,7 +791,7 @@ function handleInput(req,res){
         if(p.mode==='filter'&&p.device==='auto')return serveJson(res,{error:'select the detected node before intercepting'},400);
         inputPaused=true;
         if(p.mode==='observe'&&p.device==='auto'){
-            stopInput();var observerGeneration=inputGeneration;return physical.inventory().then(function(list){
+            stopInput(true);dock.setGrabPaused(true);var observerGeneration=inputGeneration;return physical.inventory().then(function(list){
                 if(!inputLifecycleActive)throw new Error('Input request cancelled');
                 if(observerGeneration!==inputGeneration)throw superseded();
                 var candidates=list.filter(function(d){return d.selectable;});
@@ -801,7 +802,7 @@ function handleInput(req,res){
             .catch(function(e){if(inputLifecycleActive&&observerGeneration!==inputGeneration)e=superseded();else stopInput();serveJson(res,{ok:false,error:e.message},e.superseded?409:503);});
         }
         if(p.device==='auto')return serveJson(res,{error:'select the detected node before intercepting'},400);
-        stopInput();var requestGeneration=inputGeneration;
+        stopInput(true);dock.setGrabPaused(true);var requestGeneration=inputGeneration;
         physical.start(p.device,p.mode,tokens).then(function(status){
             if(!inputLifecycleActive)throw new Error('Input request cancelled');
             if(requestGeneration!==inputGeneration)throw superseded();
@@ -809,7 +810,7 @@ function handleInput(req,res){
             serveJson(res,{ok:true,persisted:p.mode==='filter',status:inputSnapshot()});
         }).catch(function(e){
             // physical.start fails with its own "cancelled" error when a newer request stopped it: that is the same case.
-            if(inputLifecycleActive&&requestGeneration!==inputGeneration)e=superseded();else physical.stop();
+            if(inputLifecycleActive&&requestGeneration!==inputGeneration)e=superseded();else {physical.stop();dock.setGrabPaused(false);}
             serveJson(res,{ok:false,error:e.message},e.superseded?409:503);
         });
     });

@@ -5,10 +5,11 @@ const remote='N: Name="Smart Control"\nH: Handlers=event4\n';
 assert.equal(devices(remote)[0].selectable,true);
 assert.equal(devices(remote+'\n'+remote)[0].unique,false);
 assert.equal(devices('N: Name="panel key device"\nH: Handlers=event3\n')[0].selectable,false);
-// On the TV the real remote reports an empty Phys; Vetro's forwarding device carries the same name and its marker.
+// On the TV the real remote reports an empty Phys; Vetro's forwarding devices carry their own markers.
 const forwarded='N: Name="Smart Control"\nP: Phys=vetro-forwarded-remote\nH: Handlers=event30\n';
+const dockForwarded='N: Name="Smart Control"\nP: Phys=vetro-dock-forwarded\nH: Handlers=event31\n';
 const realRemote='N: Name="Smart Control"\nP: Phys=\nH: Handlers=event4\n';
-const inventory=forwarded+'\n'+realRemote;
+const inventory=forwarded+'\n'+dockForwarded+'\n'+realRemote;
 const withForwarded=devices(inventory);
 assert.equal(withForwarded.length,1);
 assert.equal(withForwarded[0].node,'/dev/input/event4');
