@@ -29,9 +29,14 @@ function keygen(folder) {
     console.log(publicPem);
 }
 
+const PACKAGE_ONLY_EXACT = new Set(['config.xml', 'LICENSE', 'THIRD_PARTY_NOTICES.md']);
+const isPackageOnly = name => PACKAGE_ONLY_EXACT.has(name) || /^notices\/[A-Za-z0-9_.-]+$/.test(name);
+
 function buildBundle(privatePem) {
     const info = {};
     const all = collectIntegration().map(f => ({ name: decodeURIComponent(f.uri), data: f.data }));
+    const rejected = all.filter(f => !updater.okPath(f.name) && !isPackageOnly(f.name));
+    if (rejected.length) throw new Error('Files in package rejected by updater.okPath: ' + rejected.map(f => f.name).join(', '));
     const files = all.filter(f => updater.okPath(f.name));
     const infoFile = files.find(f => f.name === 'service/build-info.js');
     Object.assign(info, updater.parseBuildInfo(infoFile.data));

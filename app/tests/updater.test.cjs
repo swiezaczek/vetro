@@ -25,8 +25,13 @@ function bundle(version, files, opts) {
 }
 
 // 1. paths and versions
-assert.ok(okPath('service/main.js') && okPath('native/dock/tvlauncher-dotnet.dll') && okPath('index.html') && okPath('payload/SamsungTvRootAgent.dll'));
-['config.xml', 'author-signature.xml', '../x', 'service/../x.js', 'service/sub/x.js', '/etc/passwd', 'native/../x', 'service/a b.js', 'native//x', 'native/x/'].forEach(n => assert.ok(!okPath(n), 'refused: ' + n));
+assert.ok(okPath('service/main.js') && okPath('native/dock/tvlauncher-dotnet.dll') && okPath('index.html') && okPath('payload/SamsungTvRootAgent.dll') && okPath('payload/net6/SamsungTvRootAgent.dll'));
+['config.xml', 'author-signature.xml', '../x', 'service/../x.js', 'service/sub/x.js', '/etc/passwd', 'native/../x', 'payload/../x', 'payload//x', 'service/a b.js', 'native//x', 'native/x/'].forEach(n => assert.ok(!okPath(n), 'refused: ' + n));
+assert.throws(() => new Updater({ installDir: 'relative/path', workDir: '/tmp/work' }), /Unsafe update folders/);
+if (process.platform === 'win32') {
+    const winUp = new Updater({ installDir: 'C:\\temp\\install', workDir: 'C:\\temp\\work' });
+    assert.throws(() => winUp._applyScript('0.4.0', '0.4.1', [], [], [], {}, false), /Unsafe path/);
+}
 assert.equal(compare('0.4.1', '0.4.0'), 1); assert.equal(compare('0.4.0', '0.4.0'), 0); assert.equal(compare('0.10.0', '0.9.9'), 1); assert.equal(compare('x', '0.1.0'), null);
 
 // 2. verification
