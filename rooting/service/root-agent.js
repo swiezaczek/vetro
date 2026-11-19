@@ -31,6 +31,7 @@ function RootAgentServer(opts) {
     this.onClose = opts.onClose;        // () -> void
     this._server = null;
     this._conn = null;
+    this._unauth = new Map();
     this._listeningPort = 0;
     this.log = [];   // why each connection was rejected; shown in /status
 }
@@ -70,6 +71,7 @@ RootAgentServer.prototype._handle = function (socket) {
     var authTimer = setTimeout(function () {
         if (!authed) socket.destroy();
     }, 10000);
+    this._unauth.set(socket, authTimer);
 
     socket.on('data', function (chunk) {
         buf += chunk.toString('utf8');
@@ -114,6 +116,7 @@ RootAgentServer.prototype._handle = function (socket) {
                 }
                 authed = true;
                 clearTimeout(authTimer);
+                self._unauth.delete(socket);
                 self._conn = new RootAgentConnection(socket, self.secret, nonce, ident);
                 if (self.onConnect) self.onConnect(self._conn);
                 continue;
@@ -128,6 +131,7 @@ RootAgentServer.prototype._handle = function (socket) {
     socket.on('error', function (e) { self.note('socket error: ' + (e.message || e)); });
     socket.on('close', function () {
         clearTimeout(authTimer);
+        self._unauth.delete(socket);
         if (self._conn && self._conn._socket === socket) {
             self._conn._failPending(new Error('root agent disconnected'));
             self._conn = null;
@@ -158,6 +162,11 @@ RootAgentServer.prototype.execute = function (command, timeoutMs) {
 };
 
 RootAgentServer.prototype.close = function () {
+    this._unauth.forEach(function (timer, socket) {
+        clearTimeout(timer);
+        try { socket.destroy(); } catch (e) {}
+    });
+    this._unauth.clear();
     if (this._conn) {
         this._conn._failPending(new Error('root agent server closed'));
         try { this._conn._socket.destroy(); } catch (e) {}
@@ -184,17 +193,21 @@ RootAgentConnection.prototype._send = function (payload) {
 
 RootAgentConnection.prototype._onFrame = function (payload) {
     var f = payload.split('\t');
-    if (f[0] === 'RESULT' && f.length >= 6) {
+    if (f[0] === 'RESULT') {
         var seq = f[1];
-        var p = this._pending[seq];
+        var p = seq !== undefined ? this._pending[seq] : null;
+        if (f.length !== 6 || !/^-?[0-9]+$/.test(f[2]) || !/^[01]$/.test(f[3])) {
+            if (p) {
+                delete this._pending[seq];
+                clearTimeout(p.timer);
+                p.reject(new Error('invalid root agent result'));
+            }
+            this._socket.destroy();
+            return;
+        }
         if (p) {
             delete this._pending[seq];
             clearTimeout(p.timer);
-            if (f.length !== 6 || !/^-?[0-9]+$/.test(f[2]) || !/^[01]$/.test(f[3])) {
-                p.reject(new Error('invalid root agent result'));
-                this._socket.destroy();
-                return;
-            }
             p.resolve({
                 exit_code: parseInt(f[2], 10),
                 timed_out: f[3] === '1',
@@ -223,7 +236,7 @@ RootAgentConnection.prototype.execute = function (command, timeoutMs) {
     if (typeof command !== 'string' || !command.trim() || Buffer.byteLength(command) > 65536) {
         return Promise.reject(new Error('invalid or oversized command'));
     }
-    if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 120000) {
+    if (typeof timeoutMs !== 'number' || !isFinite(timeoutMs) || Math.floor(timeoutMs) !== timeoutMs || timeoutMs < 1 || timeoutMs > 120000) {
         return Promise.reject(new Error('invalid command timeout'));
     }
     if (self._socket.destroyed) return Promise.reject(new Error('root agent disconnected'));

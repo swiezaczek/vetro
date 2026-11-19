@@ -44,6 +44,24 @@ async function main() {
     socket.destroy(); pending.catch(() => {}); server.close();
     assert.ok(result); assert.equal(result.stdout, 'ok');
   });
+  await check('malformed RESULT with <6 fields rejects immediately and destroys socket', async () => {
+    const server = new RootAgentServer(); const socket = new Socket(); server._handle(socket); authenticate(server, socket);
+    const pending = server.execute('id', 1000).then(() => 'resolved', e => e.message);
+    socket.emit('data', Buffer.from(frame(server, socket, 'RESULT\t1\t0')));
+    assert.equal(await Promise.race([pending, new Promise(r => setImmediate(() => r('still pending')))]), 'invalid root agent result');
+    assert.equal(socket.destroyed, true);
+    server.close();
+  });
+  await check('server.close() destroys pending unauthenticated sockets and ES5 timeout validation works', async () => {
+    const server = new RootAgentServer(); const unauth = new Socket(); server._handle(unauth);
+    assert.equal(server._unauth.size, 1);
+    server.close();
+    assert.equal(unauth.destroyed, true);
+    assert.equal(server._unauth.size, 0);
+    const s2 = new RootAgentServer(); const sock2 = new Socket(); s2._handle(sock2); authenticate(s2, sock2);
+    await assert.rejects(s2.execute('id', 1.5), /invalid command timeout/);
+    s2.close();
+  });
   process.exitCode = failures ? 1 : 0;
 }
 main().catch(e => { console.error(e); process.exitCode = 1; });

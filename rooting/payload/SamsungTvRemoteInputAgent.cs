@@ -938,6 +938,12 @@ internal static class SamsungTvRemoteInputAgent
                 case '\\':
                     builder.Append('\\').Append(character);
                     break;
+                case '\b':
+                    builder.Append("\\b");
+                    break;
+                case '\f':
+                    builder.Append("\\f");
+                    break;
                 case '\n':
                     builder.Append("\\n");
                     break;
@@ -948,7 +954,14 @@ internal static class SamsungTvRemoteInputAgent
                     builder.Append("\\t");
                     break;
                 default:
-                    builder.Append(character);
+                    if (character < ' ')
+                    {
+                        builder.Append("\\u").Append(((int)character).ToString("x4"));
+                    }
+                    else
+                    {
+                        builder.Append(character);
+                    }
                     break;
             }
         }
