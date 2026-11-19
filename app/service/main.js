@@ -93,9 +93,16 @@ var BOOT_RETRIES = 60;
 function tryRead(p) { try { return fs.readFileSync(p, 'utf8').trim(); } catch (e) { return null; } }
 function tryReadRaw(p) { try { return fs.readFileSync(p, 'utf8'); } catch (e) { return null; } }
 
+var telemetryCache = {at: 0, data: null};
+var TELEMETRY_TTL_MS = 1000;
+
 function readTelemetry() {
+    var now = Date.now();
+    if (telemetryCache.data && now - telemetryCache.at < TELEMETRY_TTL_MS) {
+        return Object.assign({}, telemetryCache.data);
+    }
     var out = {
-        ts: Math.floor(Date.now() / 1000),
+        ts: Math.floor(now / 1000),
         boot_id: tryRead('/proc/sys/kernel/random/boot_id'),
         hostname: tryRead('/etc/hostname'),
         loadavg: tryRead('/proc/loadavg'),
@@ -146,7 +153,8 @@ function readTelemetry() {
     if (temp) { var t = parseInt(temp, 10); out.soctemp_c = (t > 1000) ? (t / 1000) : t; }
     else out.soctemp_c = null;
 
-    return out;
+    telemetryCache = {at: Date.now(), data: out};
+    return Object.assign({}, out);
 }
 
 // What the TV screen shows. The launcher's pid check is the only root command, and it runs only while the launcher is on.
@@ -646,7 +654,12 @@ function handleLeftovers(req,res) {
     });
 }
 function handleApps(req,res) {inventory(REFRESH_QUERY_RE.test(req.url)).then(function(data){serveJson(res,data);});}
-var iconCache = {};
+var iconCache = Object.create(null), iconCacheOrder = [], MAX_ICON_CACHE = 100;
+function touchIconOrder(id) {
+    var idx = iconCacheOrder.indexOf(id);
+    if (idx >= 0) iconCacheOrder.splice(idx, 1);
+    iconCacheOrder.push(id);
+}
 // ?appId=... read straight from the query string: the one parameter does not need a URL parser.
 function appIdOf(rawUrl) {
     var m = APP_ID_QUERY_RE.exec(rawUrl || '');
@@ -657,13 +670,13 @@ function handleIcon(req,res) {
     var id=appIdOf(req.url);
     if (!id || !APP_ID_120_RE.test(id)) return serveJson(res,{error:'invalid appId'},400);
     function send(icon){res.writeHead(200,{'content-type':icon.mime,'cache-control':'private, max-age=3600','X-Content-Type-Options':'nosniff'});res.end(icon.data);}
-    if(iconCache[id])return send(iconCache[id]);
+    if(iconCache[id]){touchIconOrder(id);return send(iconCache[id]);}
     inventory(false).then(function(data){var row=data.apps.find(function(r){return r.appId===id;}), command=AppRegistry.iconCommand(row);
         if(!command)throw new Error('no readable icon');
         return agentExecute(command,10000).then(function(r){if(r.exit_code||r.timed_out)throw new Error('icon unavailable');var data=Buffer.from(r.stdout.replace(WHITESPACE_CHAR_RE,''),'base64');
             var png=data.slice(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])), jpg=data[0]===255&&data[1]===216;
             if((!png&&!jpg)||data.length>262144)throw new Error('unsupported icon');
-            var icon={data:data,mime:png?'image/png':'image/jpeg'};if(Object.keys(iconCache).length<100)iconCache[id]=icon;send(icon);
+            var icon={data:data,mime:png?'image/png':'image/jpeg'};touchIconOrder(id);iconCache[id]=icon;while(iconCacheOrder.length>MAX_ICON_CACHE)delete iconCache[iconCacheOrder.shift()];send(icon);
         });
     }).catch(function(){serveJson(res,{error:'icon unavailable'},404);});
 }
@@ -1021,13 +1034,17 @@ process.on('uncaughtException', function (e) {
 
 // Foreground app for MQTT: read-only, one small status query every 5 seconds,
 // only while a broker connection is up. Names come from the stored probe.
-var presenceTimer=setInterval(function(){
- if(!bridge.connected)return;
- presence.read().then(function(d){
-  var fg=d.foreground;if(fg){var row=apps.normalize(state.apps,state.packages).filter(function(a){return a.appId===fg.appId})[0];fg=Object.assign({name:row&&row.name||fg.appId},fg);}
-  bridge.publishPresence(fg);
- }).catch(function(){});
-},5000);if(presenceTimer.unref)presenceTimer.unref();
+var presenceTimer=null;
+function schedulePresence(){
+ presenceTimer=setTimeout(function(){
+  if(!bridge.connected){schedulePresence();return;}
+  presence.read().then(function(d){
+   var fg=d.foreground;if(fg){var row=apps.normalize(state.apps,state.packages).filter(function(a){return a.appId===fg.appId})[0];fg=Object.assign({name:row&&row.name||fg.appId},fg);}
+   bridge.publishPresence(fg);
+  }).catch(function(){}).then(schedulePresence);
+ },5000);if(presenceTimer.unref)presenceTimer.unref();
+}
+schedulePresence();
 
 // Native audio/source reads require no foreground UI and never alter the TV.
 var tvStateTimer=setInterval(function(){

@@ -13,11 +13,19 @@ var PACKAGE_ATTR_RE = /(?:^|\s)package\s*=\s*(["'])(.*?)\1/g;
 var WGT_PATH_RE = /^\/[A-Za-z0-9_./-]+\.wgt$/;
 var MAX_WGT = 32 * 1024 * 1024;
 var MAX_CONFIG = 65536;
+var CRC32_TABLE = (function () {
+    var table = typeof Uint32Array === 'function' ? new Uint32Array(256) : new Array(256);
+    for (var i = 0; i < 256; i++) {
+        var c = i;
+        for (var k = 0; k < 8; k++) c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+        table[i] = c >>> 0;
+    }
+    return table;
+}());
 function crc32(data) {
     var crc = 0xffffffff;
     for (var i = 0; i < data.length; i++) {
-        crc ^= data[i];
-        for (var bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
+        crc = (crc >>> 8) ^ CRC32_TABLE[(crc ^ data[i]) & 0xff];
     }
     return (crc ^ 0xffffffff) >>> 0;
 }

@@ -20,6 +20,8 @@ async function main() {
   await assert.rejects(info.fromBuffer(archive(xml + '<tizen:application package="other"/>', 0)), /one Tizen/);
   await assert.rejects(info.fromBuffer(archive('<!DOCTYPE widget>' + xml, 0)), /declarations/);
   await assert.rejects(info.read('/tmp/x.wgt;reboot'), /absolute/);
+  assert.equal(info.crc32(Buffer.from('123456789')), 0xcbf43926);
+  assert.equal(info.crc32(Buffer.alloc(0)), 0);
   console.log('PASS WGT: stored/deflated manifests, corrupt archives, ambiguous IDs and unsafe paths');
 }
 main().catch(e => {console.error(e); process.exitCode = 1;});

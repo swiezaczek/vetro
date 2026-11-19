@@ -116,6 +116,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .panel>.section-note,.panel>.notice{margin-bottom:0}
 .panel>h3:not(:first-child){margin-top:var(--s5)}
 .panel+.panel,.panel+.box,.box+.box,#dockBody>*+*,.layout+.box{margin-top:var(--s4)}
+#quickPanel-general .general-wide,#settingGroups .panel+.panel,#mqtt .panel+.panel{content-visibility:auto;contain-intrinsic-block-size:auto 12rem}
 .panel-head{display:flex;justify-content:space-between;align-items:center;gap:var(--s3)}
 .panel-head small{color:var(--muted);font-size:var(--fs-s)}
 .layout,.chart-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s4)}

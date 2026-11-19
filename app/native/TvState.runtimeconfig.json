@@ -1,1 +1,18 @@
-{"runtimeOptions": {"tfm": "netcoreapp3.1", "framework": {"name": "Microsoft.NETCore.App", "version": "3.1.0"}}}
+{
+  "runtimeOptions": {
+    "tfm": "netcoreapp3.1",
+    "framework": {
+      "name": "Microsoft.NETCore.App",
+      "version": "3.1.0"
+    },
+    "configProperties": {
+      "System.GC.Server": false,
+      "System.GC.Concurrent": false,
+      "System.GC.RetainVM": false,
+      "System.Globalization.Invariant": true,
+      "System.Reflection.Metadata.MetadataUpdater.IsSupported": false,
+      "System.Resources.UseSystemResourceKeys": true,
+      "System.Runtime.TieredCompilation": false
+    }
+  }
+}

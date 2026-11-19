@@ -101,9 +101,10 @@ var PURPOSE = {
 };
 
 function areaOf(packageId, appId) {
-    var ids = [packageId || '', appId || ''];
+    var pkg = packageId || '', app = appId || '';
     for (var i = 0; i < RULES.length; i++) {
-        if (ids.some(function (id) { return RULES[i][1].test(id); })) return RULES[i][0];
+        var re = RULES[i][1];
+        if (re.test(pkg) || re.test(app)) return RULES[i][0];
     }
     return 'system';
 }
