@@ -171,13 +171,17 @@ function refusedText(status, d) {
   return 'HTTP ' + status + (seen.address ? ' from ' + String(seen.address).slice(0, 45) : '') + (seen.origin ? ' origin ' + String(seen.origin).slice(0, 60) : '');
 }
 function reach(tries) {
-  return fetch(BASE + '/status').then(function (r) {
+  var ac = typeof AbortController === 'function' ? new AbortController() : null;
+  var timer = ac ? setTimeout(function () { ac.abort(); }, 8000) : null;
+  return fetch(BASE + '/status', ac ? {signal: ac.signal} : undefined).then(function (r) {
+    if (timer) clearTimeout(timer);
     if (r.status === 200) return r.status;
     return r.json().then(null, function () { return null; }).then(function (d) {
       refusal = refusedText(r.status, d);
       throw new Error('refused: ' + refusal);
     });
   }, function (e) {
+    if (timer) clearTimeout(timer);
     if (tries <= 1) throw e;
     return new Promise(function (resolve) { setTimeout(resolve, 1500); }).then(function () { return reach(tries - 1); });
   });
@@ -222,10 +226,12 @@ function readScreen() {
 }
 function tryConnect(port) {
   return new Promise(function (resolve, reject) {
+    var settled = false;
     var ws = new WebSocket('ws://127.0.0.1:' + port + '/api/v2/channels/samsung.remote.control?name=' + btoa('Vetro'));
-    var t = setTimeout(function () { try { ws.close(); } catch (e) {} reject(new Error('timeout')); }, 4000);
-    ws.onopen = function () { clearTimeout(t); ws.close(); resolve('open'); };
-    ws.onerror = function () { clearTimeout(t); reject(new Error('refused')); };
+    var t = setTimeout(function () { if (settled) return; settled = true; try { ws.close(); } catch (e) {} reject(new Error('timeout')); }, 4000);
+    ws.onopen = function () { if (settled) return; settled = true; clearTimeout(t); ws.close(); resolve('open'); };
+    ws.onerror = function () { if (settled) return; settled = true; clearTimeout(t); reject(new Error('refused')); };
+    ws.onclose = function () { if (settled) return; settled = true; clearTimeout(t); reject(new Error('closed')); };
   });
 }
 // The steps run side by side, except that the service answer waits for the service start. The model and the service
