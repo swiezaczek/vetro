@@ -84,9 +84,11 @@ const tv = {ip: '127.0.0.1', headers: {origin: 'null', host: '127.0.0.1:8099'}};
     assert.equal(exec.code, 401); assert.equal(exec.headers['Access-Control-Allow-Origin'], undefined, 'other routes stay unreadable cross-origin');
     assert.equal(exec.body.seen, undefined);
   }
-  // Web pages can't start or finish a pairing: the Origin must match the Host.
+  // Web pages (including opaque null Origin sandboxed frames) can't start or finish a pairing: the Origin must match the Host.
   assert.equal((await call('POST', '/auth/pair', {headers: {origin: 'http://evil.example'}, body: {}})).code, 403);
   assert.equal((await call('POST', '/auth/confirm', {headers: {origin: 'http://evil.example'}, body: {}})).code, 403);
+  assert.equal((await call('POST', '/auth/pair', {headers: {origin: 'null'}, body: {}})).code, 403);
+  assert.equal((await call('POST', '/auth/confirm', {headers: {origin: 'null'}, body: {}})).code, 403);
   // App-only mode (no TV adapter) stays open, but still refuses host names.
   assert.equal((await call('POST', '/exec', {open: true})).handled, false);
   assert.equal((await call('GET', '/', {open: true, headers: {host: 'evil.example:8099'}})).code, 403);
@@ -121,6 +123,7 @@ const tv = {ip: '127.0.0.1', headers: {origin: 'null', host: '127.0.0.1:8099'}};
   assert.equal((await call('POST', '/exec', {headers: {authorization: 'Bearer ' + ok.body.token}})).handled, false);
   assert.equal((await call('POST', '/sdb-access', {headers: {authorization: 'Bearer ' + ok.body.token}})).handled, false);
   assert.equal((await call('POST', '/exec', {headers: Object.assign({origin: 'http://evil.example'}, cookie)})).code, 403);
+  assert.equal((await call('POST', '/exec', {headers: Object.assign({origin: 'null'}, cookie)})).code, 403);
   assert.equal((await call('GET', '/auth/devices', {headers: cookie})).body.devices[0].name, 'Mac');
   // Paired clients may reach the TV by name (tv.local, Home Assistant); the cookie stays bound to that host.
   assert.equal((await call('POST', '/exec', {headers: Object.assign({host: 'tv.local:8099', origin: 'http://tv.local:8099'}, cookie)})).handled, false);
@@ -194,6 +197,31 @@ const tv = {ip: '127.0.0.1', headers: {origin: 'null', host: '127.0.0.1:8099'}};
       assert.equal((await call('GET', '/apps', {headers: {authorization: 'Bearer ' + r.body.token}})).handled, false);
       assert.equal((await call('GET', '/apps', {headers: {authorization: 'Bearer ' + 'f'.repeat(64)}})).code, 401);
     } finally { crypto.timingSafeEqual = real; }
+  }
+
+  // Concurrent /auth/pair requests before body finishes cannot overwrite pending, and oversized body returns 413.
+  auth._reset();
+  {
+    const mkReq = () => {
+      const req = new EventEmitter();
+      Object.assign(req, {method: 'POST', url: '/auth/pair', socket: {remoteAddress: '192.168.1.20'}, headers: {host: '192.168.1.10:8099'}});
+      return req;
+    };
+    let r1Res, r2Res;
+    const p1 = new Promise(resolve => { r1Res = {writeHead(c) { this.c = c; }, end(t) { resolve({code: this.c, body: JSON.parse(t)}); }}; });
+    const p2 = new Promise(resolve => { r2Res = {writeHead(c) { this.c = c; }, end(t) { resolve({code: this.c, body: JSON.parse(t)}); }}; });
+    const req1 = mkReq(), req2 = mkReq();
+    let launches = 0;
+    assert.equal(auth.gate(req1, r1Res, '/auth/pair', {onPair: () => launches++}), true);
+    assert.equal(auth.gate(req2, r2Res, '/auth/pair', {onPair: () => launches++}), true);
+    req1.emit('data', Buffer.from(JSON.stringify({name: 'First'}))); req1.emit('end');
+    req2.emit('data', Buffer.from(JSON.stringify({name: 'Second'}))); req2.emit('end');
+    const [a, b] = await Promise.all([p1, p2]);
+    assert.equal(a.code, 200); assert.equal(b.code, 429); assert.equal(launches, 1);
+
+    auth._reset();
+    const big = await call('POST', '/auth/confirm', {body: {name: 'x'.repeat(3000)}});
+    assert.equal(big.code, 413);
   }
 
   console.log('PASS auth: TV widget passes, LAN pairs with a TV-only code, one pairing at a time, cookie/bearer keys (any host name), rebinding and cross-site refused, sign-out, app-only open, 20-key limit, save failures reported, Node 4 fallback');
