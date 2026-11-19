@@ -330,8 +330,15 @@ function startAgent() {
             // The agent has detached; release any remaining launch connection.
             if (launchClient) { try { sdb.close(launchClient); } catch (e) {} launchClient = null; }
         },
-        onClose: function () {
+        onClose: function (err) {
             if (agentServer !== server || !state.running) return;
+            if (!state.agentPort) {
+                try { server.close(); } catch (e) {}
+                agentServer = null;
+                rootFailure('agent-server', (err && err.message) || 'listen-failed');
+                persist();
+                return;
+            }
             agentConnected = false;
             state.agent = { connected: false };
             rootFailure('agent-connection', 'agent-disconnected');
@@ -363,7 +370,7 @@ function scheduleRelaunch() {
 }
 
 function relaunch() {
-    if (launching || agentConnected || !agentServer || !state.running || state.unsupported) return;
+    if (launching || agentConnected || !agentServer || !state.agentPort || !state.running || state.unsupported) return;
     launching = true;
     rootPhase('preparing');
     var gen = ++launchGen;

@@ -372,19 +372,30 @@ internal static class SamsungTvRootAgent
                 }
                 process.WaitForExit();
             }
-            Task.WaitAll(output, error);
-            byte[] standardError = error.Result.Data;
-            if (output.Result.Truncated || error.Result.Truncated)
+            bool streamsDone = Task.WaitAll(new Task[] { output, error }, 2000);
+            if (!streamsDone)
+            {
+                output.ContinueWith(_ => { }, TaskContinuationOptions.OnlyOnFaulted);
+                error.ContinueWith(_ => { }, TaskContinuationOptions.OnlyOnFaulted);
+            }
+            CapturedOutput stdoutCap = output.IsCompleted && !output.IsFaulted
+                ? output.Result
+                : new CapturedOutput(Array.Empty<byte>(), true);
+            CapturedOutput stderrCap = error.IsCompleted && !error.IsFaulted
+                ? error.Result
+                : new CapturedOutput(Array.Empty<byte>(), true);
+            byte[] standardError = stderrCap.Data;
+            if (stdoutCap.Truncated || stderrCap.Truncated)
             {
                 standardError = AppendOutputLimitNotice(
                     standardError,
-                    output.Result.Truncated,
-                    error.Result.Truncated);
+                    stdoutCap.Truncated,
+                    stderrCap.Truncated);
             }
             return new CommandResult(
                 exited ? process.ExitCode : 124,
                 !exited,
-                output.Result.Data,
+                stdoutCap.Data,
                 standardError);
         }
     }

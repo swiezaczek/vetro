@@ -43,12 +43,21 @@ RootAgentServer.prototype.note = function (what) {
 
 RootAgentServer.prototype.start = function (cb) {
     var self = this;
-    this._server = net.createServer(function (socket) {
+    var started = false;
+    var srv = net.createServer(function (socket) {
         self._handle(socket);
     });
-    this._server.on('error', function (e) { if (self.onClose) self.onClose(e); });
-    this._server.listen(this.port, this.bindHost, function () {
-        self._listeningPort = self._server.address().port;
+    this._server = srv;
+    srv.on('error', function (e) {
+        if (!started && self._server === srv) {
+            self._server = null;
+            self._listeningPort = 0;
+        }
+        if (self.onClose) self.onClose(e);
+    });
+    srv.listen(this.port, this.bindHost, function () {
+        started = true;
+        self._listeningPort = srv.address().port;
         if (cb) cb(self._listeningPort);
     });
     return this;
@@ -236,7 +245,7 @@ RootAgentConnection.prototype.execute = function (command, timeoutMs) {
     if (typeof command !== 'string' || !command.trim() || Buffer.byteLength(command) > 65536) {
         return Promise.reject(new Error('invalid or oversized command'));
     }
-    if (typeof timeoutMs !== 'number' || !isFinite(timeoutMs) || Math.floor(timeoutMs) !== timeoutMs || timeoutMs < 1 || timeoutMs > 120000) {
+    if (typeof timeoutMs !== 'number' || !isFinite(timeoutMs) || Math.floor(timeoutMs) !== timeoutMs || timeoutMs < 100 || timeoutMs > 120000) {
         return Promise.reject(new Error('invalid command timeout'));
     }
     if (self._socket.destroyed) return Promise.reject(new Error('root agent disconnected'));

@@ -24,7 +24,7 @@ async function main() {
   }
   await check('disconnect rejects pending commands immediately', async () => {
     const server = new RootAgentServer(); const socket = new Socket(); server._handle(socket); authenticate(server, socket);
-    const pending = server.execute('id', 1).then(() => 'resolved', () => 'rejected');
+    const pending = server.execute('id', 1000).then(() => 'resolved', () => 'rejected');
     socket.destroy();
     assert.equal(await Promise.race([pending, new Promise(r => setImmediate(() => r('still pending')))]), 'rejected');
     server.close();
@@ -37,7 +37,7 @@ async function main() {
   });
   await check('AUTH and RESULT in one TCP chunk are both processed', async () => {
     let pending;
-    const server = new RootAgentServer({onConnect: () => { pending = server.execute('id', 1); }});
+    const server = new RootAgentServer({onConnect: () => { pending = server.execute('id', 1000); }});
     const socket = new Socket(); server._handle(socket);
     socket.emit('data', Buffer.from(frame(server, socket, 'AUTH\t42\t0\t0\t0\t0\t3fffffffff\tVXNlcg==') + frame(server, socket, 'RESULT\t1\t0\t0\tb2s=\t')));
     const result = await Promise.race([pending, new Promise(r => setImmediate(() => r(null)))]);
@@ -60,7 +60,25 @@ async function main() {
     assert.equal(server._unauth.size, 0);
     const s2 = new RootAgentServer(); const sock2 = new Socket(); s2._handle(sock2); authenticate(s2, sock2);
     await assert.rejects(s2.execute('id', 1.5), /invalid command timeout/);
+    await assert.rejects(s2.execute('id', 50), /invalid command timeout/);
     s2.close();
+  });
+  await check('listen failure clears _server and delivers error to onClose', async () => {
+    const net = require('net');
+    const blocker = net.createServer();
+    await new Promise(resolve => blocker.listen(0, '127.0.0.1', resolve));
+    const port = blocker.address().port;
+    let errSeen = null;
+    const server = new RootAgentServer({ port, onClose: e => { errSeen = e; } });
+    await new Promise(resolve => {
+      const orig = server.onClose;
+      server.onClose = e => { orig(e); resolve(); };
+      server.start();
+    });
+    blocker.close();
+    assert.ok(errSeen);
+    assert.equal(server.listeningPort(), 0);
+    assert.equal(server._server, null);
   });
   process.exitCode = failures ? 1 : 0;
 }
