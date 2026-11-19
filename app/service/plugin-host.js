@@ -119,10 +119,15 @@ PluginHost.prototype._readState = function () {
 PluginHost.prototype._writeState = function (state) {
     try {
         fs.mkdirSync(this.dir);
-    } catch (e) { /* already there */ }
+    } catch (e) { if (e.code !== 'EEXIST') throw e; }
     var temp = this._file('plugins.json.tmp');
-    fs.writeFileSync(temp, JSON.stringify(state) + '\n');
-    fs.renameSync(temp, this._file('plugins.json'));
+    try {
+        fs.writeFileSync(temp, JSON.stringify(state) + '\n', 'utf8');
+        fs.renameSync(temp, this._file('plugins.json'));
+    } catch (e) {
+        try { fs.unlinkSync(temp); } catch (ignored) {}
+        throw e;
+    }
 };
 
 // Plugins come from folders, never from the network: whoever puts one there has
@@ -510,6 +515,7 @@ PluginHost.prototype.resume = function () {
     var state = this._readState();
     state.suspended = false;
     this._writeState(state);
+    this.markStable();
     return { ok: true, restartRequired: this.safeMode };
 };
 
@@ -610,14 +616,17 @@ PluginHost.prototype.handle = function (req, res, pathname, json, readBody) {
             }
             var state = self._readState();
             state.developer = p.on;
-            self._writeState(state);
-            json(res, { ok: true, developer: p.on });
+            try { self._writeState(state); json(res, { ok: true, developer: p.on }); }
+            catch (e) { json(res, { ok: false, error: e.message }, 500); }
         });
         return true;
     }
     if (id === 'resume') {
         if (req.method !== 'POST') json(res, { error: 'Method not allowed' }, 405);
-        else json(res, this.resume());
+        else {
+            try { json(res, this.resume()); }
+            catch (e) { json(res, { ok: false, error: e.message }, 500); }
+        }
         return true;
     }
     var entry = this.entries[id];

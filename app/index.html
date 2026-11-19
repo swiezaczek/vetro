@@ -136,16 +136,18 @@ function lanAddresses() {
     });
   })).then(function (ips) { return ips.filter(function (ip) { return ip && ip !== '0.0.0.0' && /^\d{1,3}(\.\d{1,3}){3}$/.test(ip); }); });
 }
-var baseChosen = null, lanKnown = null;
+var baseChosen = null, lanKnown = null, pickPending = null;
 // Resolves true when some address answered (and BASE is then that one), false when none did. A failure is not kept: the
 // service may simply not be up yet, and the next try looks again.
 function pickBase() {
   if (baseChosen) return Promise.resolve(true);
+  if (pickPending) return pickPending;
   var port = BASE.split(':').pop();
-  return answers(BASE).then(function (yes) {
+  pickPending = answers(BASE).then(function (yes) {
     if (yes) { baseChosen = BASE; return true; }
     return (lanKnown || (lanKnown = lanAddresses())).then(function (ips) {
-      return ips.reduce(function (p, ip) {
+      if (!ips || !ips.length) lanKnown = null;
+      return (ips || []).reduce(function (p, ip) {
         return p.then(function (found) {
           if (found) return found;
           var base = 'http://' + ip + ':' + port;
@@ -153,7 +155,8 @@ function pickBase() {
         });
       }, Promise.resolve(null));
     }).then(function (found) { if (found) { BASE = found; baseChosen = found; } return !!found; });
-  });
+  }).then(function (ok) { pickPending = null; return ok; }, function (e) { pickPending = null; throw e; });
+  return pickPending;
 }
 function settleBase(tries) {
   return pickBase().then(function (ok) {
@@ -442,12 +445,15 @@ function showPairing(p) {
   paintPairing();
   if (pairing && pairing.code !== was) ding();
 }
+var pairChecking = false;
 function checkPairing() {
-  if (document.hidden) return;
+  if (document.hidden || pairChecking) return;
+  pairChecking = true;
   var xhr = new XMLHttpRequest();
   xhr.open('GET', BASE + '/auth/pending', true);
   xhr.timeout = 3000;
   xhr.onload = function () {
+    pairChecking = false;
     var d, was = pairingBlocked;
     try { d = JSON.parse(xhr.responseText); } catch (e) { return; }
     if (xhr.status !== 200) {
@@ -459,7 +465,8 @@ function checkPairing() {
     if (was) paintPairing();
     showPairing(d);
   };
-  xhr.send();
+  xhr.onerror = xhr.ontimeout = xhr.onabort = function () { pairChecking = false; };
+  try { xhr.send(); } catch (e) { pairChecking = false; }
 }
 function resetIdle() {
   clearTimeout(idleTimer);
@@ -542,7 +549,10 @@ function readPackages() {
     render(lastScreen, false);
   });
 }
-document.addEventListener('visibilitychange', function () { if (document.hidden && delivered) leave(); });
+document.addEventListener('visibilitychange', function () {
+  if (document.hidden && delivered) leave();
+  else if (!document.hidden) checkPairing();
+});
 document.addEventListener('keydown', function (e) {
   var k = e && e.keyCode;
   resetIdle();
@@ -554,7 +564,7 @@ fit();
 resetIdle();
 checkPairing();
 setInterval(checkPairing, 2000);
-setInterval(function () { if (pairing) paintPairing(); }, 1000);
+setInterval(function () { if (pairing && !document.hidden) paintPairing(); }, 1000);
 // Module scripts run after this classic script and before DOMContentLoaded.
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run); else run();
 </script>
