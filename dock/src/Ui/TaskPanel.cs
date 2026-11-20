@@ -14,6 +14,8 @@ namespace Launcher.Ui
     /// </summary>
     internal sealed class TaskPanel : CardChrome
     {
+        private const double ClosingTimeoutSeconds = TaskCloseTracker.ClosingTimeoutSeconds;
+
         private sealed class Row
         {
             public RunningApp App;
@@ -65,14 +67,14 @@ namespace Launcher.Ui
             }
             _rows.Clear();
             long now = Stopwatch.GetTimestamp();
-            long limit = (long)(Tasks.ClosingTimeoutSeconds * Stopwatch.Frequency);
+            long closingLimit = (long)(ClosingTimeoutSeconds * Stopwatch.Frequency);
             foreach (RunningApp a in apps)
             {
                 Row r;
                 if (_byId.TryGetValue(a.AppId, out r))
                 {
-                    // Still closing until it is gone, or until the close is taken as failed: then it can be opened or closed again.
-                    a.Closing = a.Closing || Tasks.StillClosing(r.App.Closing, r.App.Pid, a.Pid, r.ClosingAt, now, limit);
+                    a.Closing = a.Closing || TaskCloseTracker.KeepClosing(r.App.Closing, r.App.Pid, a.Pid, r.ClosingAt, now, closingLimit);
+                    if (!a.Closing) r.ClosingAt = 0;
                     r.App = a;
                 }
                 else { r = NewRow(a); _byId[a.AppId] = r; }
