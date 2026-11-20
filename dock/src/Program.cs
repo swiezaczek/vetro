@@ -1637,6 +1637,7 @@ namespace Launcher
         {
             try
             {
+                if (_pad != null && _pad.IsOnScreen) return;
                 // Evas_Event_Key_Down starts with `const char *keyname`.
                 string key = Marshal.PtrToStringAnsi(Marshal.ReadIntPtr(eventInfo));
                 if (key == "XF86Home" && _homeClaimed && !DockActive) { WindowHome(); return; }
