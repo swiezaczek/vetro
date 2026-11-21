@@ -46,6 +46,9 @@ function probe(overrides) {
                 const config = JSON.parse(fs.readFileSync(staged + '.runtimeconfig.json'));
                 assert.equal(config.runtimeOptions.framework.version, runtime + '.0');
                 assert.equal(config.runtimeOptions.rollForward, runtime === '6.0' ? 'Major' : 'LatestPatch');
+                assert.equal(config.runtimeOptions.configProperties['System.GC.Concurrent'], false);
+                assert.equal(config.runtimeOptions.configProperties['System.Globalization.Invariant'], true);
+                assert.equal(config.runtimeOptions.configProperties['System.Reflection.Metadata.MetadataUpdater.IsSupported'], false);
                 assert.equal(JSON.parse(fs.readFileSync(staged + '.deps.json')).runtimeTarget.name, '.NETCoreApp,Version=v' + runtime);
             }
         }

@@ -83,6 +83,7 @@ function ensureDir(p) {
 function buildLaunchScript(agentPort) {
     var staging = STAGE + '/' + pkg;
     return '#!/bin/sh\n' +
+        'DOTNET_EnableDiagnostics=0 DOTNET_gcConcurrent=0 DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 ' +
         '/usr/bin/dotnet ' + staging + '/SamsungTvRootAgent.dll ' +
         '127.0.0.1 ' + agentPort + ' ' +
         staging + '/root-agent.token ' +
@@ -166,6 +167,13 @@ function prepare(agentPort, runtime) {
         if (/\.runtimeconfig\.json$/.test(n)) {
             var config = JSON.parse(data.toString('utf8'));
             config.runtimeOptions.rollForward = runtime === '6.0' ? 'Major' : 'LatestPatch';
+            config.runtimeOptions.configProperties = Object.assign({}, config.runtimeOptions.configProperties || {}, {
+                'System.GC.Concurrent': false,
+                'System.Globalization.Invariant': true,
+                'System.Reflection.Metadata.MetadataUpdater.IsSupported': false,
+                'System.Resources.UseSystemResourceKeys': true,
+                'System.Runtime.TieredCompilation': true
+            });
             data = JSON.stringify(config);
         }
         fs.writeFileSync(path.join(staging, n), data);
@@ -389,6 +397,16 @@ function startAgent() {
             // The agent has detached; release any remaining launch connection.
             if (launchClient) { try { sdb.close(launchClient); } catch (e) {} launchClient = null; }
             notifyAgent(true);
+            var activePid = Number(conn.identity && conn.identity.pid);
+            if (Number.isInteger(activePid) && activePid > 0) {
+                var cleanCmd = 'active=' + activePid + '; ' +
+                    'for d in /proc/[0-9]*; do pid=${d#/proc/}; [ "$pid" = "$active" ] || [ "$pid" = "$PPID" ] && continue; ' +
+                    'case "$(tr "\\0" " " < "$d/cmdline" 2>/dev/null)" in *SamsungTvRootAgent.dll*) ' +
+                    'kill -9 "$pid" 2>/dev/null; rm -rf "/run/samsung-tv-root/agent-$pid" 2>/dev/null;; esac; done; ' +
+                    'for s in /tmp/dotnet-diagnostic-*-socket; do [ -e "$s" ] || continue; sp=${s#/tmp/dotnet-diagnostic-}; sp=${sp%%-*}; ' +
+                    '[ "$sp" = "$active" ] || [ -d "/proc/$sp" ] || rm -f "$s" 2>/dev/null; done; true';
+                try { conn.execute(cleanCmd, 5000).catch(function () {}); } catch (e) {}
+            }
         },
         onClose: function () {
             if (!state.running) return;

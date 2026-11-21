@@ -301,4 +301,20 @@ function settle() { return new Promise(r => setImmediate(r)); }
         u.provider.stop();
         console.log('PASS the SDB tunnel tries its port again while an older Vetro still holds it');
     }
+    // Race-free orphan RootAgent cleanup runs on connect, skipping active PID and $PPID
+    {
+        const t = load();
+        const cmds = [];
+        t.provider.start();
+        await settle();
+        t.agentOptions().onConnect({
+            identity: { pid: 5555, uid: 0, gid: 0, cap_eff: '0000003fffffffff', smack: 'User' },
+            execute(cmd) { cmds.push(cmd); return Promise.resolve({ exit_code: 0, stdout: '' }); }
+        });
+        await settle();
+        assert.ok(cmds.some(c => c.includes('active=5555') && c.includes('"$PPID"') && c.includes('SamsungTvRootAgent.dll') && c.includes('dotnet-diagnostic-*-socket')),
+            'onConnect sweeps orphan RootAgents while skipping active PID and $PPID');
+        t.provider.stop();
+        console.log('PASS orphan RootAgent cleanup runs safely on connect');
+    }
 })().catch(e => { console.error(e); process.exit(1); });
