@@ -125,6 +125,7 @@ function Dock(options) {
     this.goneRounds = 0;
     this.inputsFile = options.inputsFile || path.join(path.dirname(this.appsFile), 'vetro-dock-inputs.tsv');
     this.allAppsFile = options.allAppsFile || path.join(path.dirname(this.appsFile), 'vetro-dock-allapps.tsv');
+    this.pictureModesFile = options.pictureModesFile || path.join(path.dirname(this.appsFile), 'vetro-dock-picture-modes.txt');
     // The one-time migration of the two source options reads both lists; it is read once, and only when a state lacks them.
     this.legacySources = null;
     this.stateCache = null;       // the parsed state file and the stat it was read at (readState)
@@ -172,6 +173,107 @@ Dock.prototype.installed = function () {
 };
 
 var VOLUME_EDGES = ['left', 'right', 'top', 'bottom', 'hidden'];   // where the volume bar sits (the dock's --volume-edge); hidden: the level changes, no bar
+var PICTURE_MODE_CANDIDATES = [
+    [65536, 'Dynamic'], [393224, 'Dynamic'],
+    [65541, 'Entertain'],
+    [65537, 'Standard'], [393216, 'Standard'], [458753, 'Standard'], [458756, 'Standard'],
+    [65552, 'Eco'], [393227, 'Eco'], [458775, 'Eco'], [458776, 'Eco'],
+    [65542, 'Natural'],
+    [65538, 'Movie'], [393217, 'Movie'],
+    [65539, 'Calibrated Night'], [393218, 'Calibrated Night'],
+    [65540, 'Calibrated Day'], [393219, 'Calibrated Day'],
+    [589824, 'Adaptive Picture'], [589825, 'Adaptive Picture'],
+    [655360, 'Filmmaker Mode'], [655361, 'Filmmaker Mode']
+];
+var PICTURE_MODES = ['Dynamic', 'Entertain', 'Standard', 'Eco', 'Natural', 'Movie', 'Calibrated Night', 'Calibrated Day', 'Adaptive Picture', 'Filmmaker Mode'];
+var DEFAULT_PICTURE_MODES = ['Movie', 'Filmmaker Mode'];
+var FALLBACK_PICTURE_MODES = ['Dynamic', 'Standard', 'Movie', 'Filmmaker Mode'];
+var CHECK_PICTURE_GROUP_CMD = 'dbus-send --system --reply-timeout=3000 --print-reply=literal --dest=org.tizen.tv.avoc /org/tizen/tv/avoc org.tizen.tv.avoc.AvOutputControl.CheckPictureModeByGroup array:int32:' +
+    PICTURE_MODE_CANDIDATES.map(function (c) { return c[0]; }).join(',') + ' int32:' + PICTURE_MODE_CANDIDATES.length;
+var CHECK_PICTURE_BUSCTL_CMD = '{ ' + PICTURE_MODE_CANDIDATES.map(function (c) {
+    return 'busctl --timeout=3 call org.tizen.tv.avoc /org/tizen/tv/avoc org.tizen.tv.avoc.AvOutputControl CheckPictureModeByMode i ' + c[0] + ' || echo x';
+}).join('; ') + '; }';
+function cleanKnownPictureModes(list) {
+    var set = {};
+    (Array.isArray(list) ? list : []).forEach(function (m) {
+        if (typeof m === 'string' && PICTURE_MODES.indexOf(m) >= 0) set[m] = true;
+    });
+    var out = PICTURE_MODES.filter(function (m) { return !!set[m]; });
+    return out.length >= 2 ? out : null;
+}
+function cleanPictureModes(list) {
+    var out = [];
+    (Array.isArray(list) ? list : []).forEach(function (m) {
+        if (typeof m === 'string' && PICTURE_MODES.indexOf(m) >= 0 && out.indexOf(m) < 0) out.push(m);
+    });
+    return out.length >= 2 ? out : DEFAULT_PICTURE_MODES.slice();
+}
+function effectivePictureModes(preferred, choices) {
+    var avail = Array.isArray(choices) && choices.length >= 2 ? choices : FALLBACK_PICTURE_MODES;
+    var out = [];
+    (Array.isArray(preferred) ? preferred : []).forEach(function (m) {
+        if (typeof m === 'string' && avail.indexOf(m) >= 0 && out.indexOf(m) < 0) out.push(m);
+    });
+    if (out.length >= 2) return out;
+    DEFAULT_PICTURE_MODES.forEach(function (m) {
+        if (avail.indexOf(m) >= 0 && out.indexOf(m) < 0) out.push(m);
+    });
+    avail.forEach(function (m) {
+        if (out.length < 2 && out.indexOf(m) < 0) out.push(m);
+    });
+    return out;
+}
+function mapOfferedPictureModes(values) {
+    if (!Array.isArray(values) || values.length !== PICTURE_MODE_CANDIDATES.length) return null;
+    var out = [];
+    for (var i = 0; i < values.length; i++) {
+        if (values[i] === 1) {
+            var name = PICTURE_MODE_CANDIDATES[i][1];
+            if (out.indexOf(name) < 0) out.push(name);
+        }
+    }
+    return out;
+}
+function parsePictureModesGroup(text) {
+    if (!text) return null;
+    var lines = String(text).replace(/\r/g, '').split('\n');
+    var inArray = false, arrayDone = false, seenEndRc = false, values = [], i, t, v, rc;
+    for (i = 0; i < lines.length; i++) {
+        t = lines[i].trim();
+        if (!t) continue;
+        if (!inArray && !arrayDone) {
+            if (t === 'array [' || t.indexOf('array [') === 0) inArray = true;
+            continue;
+        }
+        if (inArray) {
+            if (t === ']' || t.indexOf(']') === 0) { inArray = false; arrayDone = true; continue; }
+            if (t.indexOf('int32 ') === 0) {
+                v = t.slice(6).trim();
+                if (!/^-?\d+$/.test(v)) return null;
+                values.push(+v);
+            }
+            continue;
+        }
+        if (t.indexOf('int32 ') === 0) {
+            rc = t.slice(6).trim();
+            if (!/^-?\d+$/.test(rc) || +rc !== 0) return null;
+            seenEndRc = true;
+        }
+    }
+    if (!seenEndRc || values.length !== PICTURE_MODE_CANDIDATES.length) return null;
+    return mapOfferedPictureModes(values);
+}
+function parsePictureModesBusctl(text) {
+    if (!text) return null;
+    var lines = String(text).replace(/\r/g, '').split('\n'), values = [], i, t, m;
+    for (i = 0; i < lines.length && values.length < PICTURE_MODE_CANDIDATES.length; i++) {
+        t = lines[i].trim();
+        if (!t) continue;
+        m = /^i\s+(-?\d+)$/.exec(t);
+        values.push(m ? +m[1] : 0);
+    }
+    return values.length === PICTURE_MODE_CANDIDATES.length ? mapOfferedPictureModes(values) : null;
+}
 // The Control center's cards (Down on the apps row), in the order they stand on screen; at most three (the dock's --cards).
 var CARDS = ['tasks', 'audio', 'picture', 'sleep'], MAX_CARDS = 3;
 // A Shard (plugin) can add one card (manifest "controlCenter"): it is named "shard:<plugin id>". A saved list keeps such a name even while
@@ -233,7 +335,9 @@ Dock.prototype.readState = function () {
     try {
         var s = this.readStateFile();
         return {enabled: s && s.enabled === true, since: typeof s.since === 'number' ? s.since : null, fixTizenTube: s && s.fixTizenTube === true,
-            noMotion: s && s.noMotion === true, volumePill: s && s.volumePill === true, volumeEdge: s && VOLUME_EDGES.indexOf(s.volumeEdge) >= 0 ? s.volumeEdge : 'left', numberPad: s && s.numberPad === true, taskManager: stateCards(s).indexOf('tasks') >= 0, cards: stateCards(s), closeIdleHome: s && typeof s.closeIdleHome === 'boolean' ? s.closeIdleHome : true, row: cleanRow(s && s.row), autorunWas: s && s.autorunWas === 1 ? 1 : null,
+            noMotion: s && s.noMotion === true, volumePill: s && s.volumePill === true, volumeEdge: s && VOLUME_EDGES.indexOf(s.volumeEdge) >= 0 ? s.volumeEdge : 'left', numberPad: s && s.numberPad === true,
+            pictureCycle: s && s.pictureCycle === true, pictureModes: cleanPictureModes(s && s.pictureModes), knownPictureModes: cleanKnownPictureModes(s && s.knownPictureModes),
+            taskManager: stateCards(s).indexOf('tasks') >= 0, cards: stateCards(s), closeIdleHome: s && typeof s.closeIdleHome === 'boolean' ? s.closeIdleHome : true, row: cleanRow(s && s.row), autorunWas: s && s.autorunWas === 1 ? 1 : null,
             customApp: s && typeof s.customApp === 'string' && APP_ID_RE.test(s.customApp) ? s.customApp : null,
             customSince: s && typeof s.customSince === 'number' ? s.customSince : null,
             customHomeDisabled: s && s.customHomeDisabled === true,
@@ -252,7 +356,9 @@ Dock.prototype.readState = function () {
             hideTvSource: s && s.hideTvSource === true,
             // The store pill of All apps: TV-Store when it is installed (the default), or Samsung's store.
             appStore: s && s.appStore === 'samsung' ? 'samsung' : 'tvstore'};
-    } catch (e) { return {enabled: false, since: null, fixTizenTube: false, noMotion: false, volumePill: false, volumeEdge: 'left', numberPad: false, taskManager: false, cards: [], closeIdleHome: true, shownCards: null, row: null, autorunWas: null, customApp: null, customSince: null, customHomeDisabled: false,
+    } catch (e) { return {enabled: false, since: null, fixTizenTube: false, noMotion: false, volumePill: false, volumeEdge: 'left', numberPad: false,
+        pictureCycle: false, pictureModes: DEFAULT_PICTURE_MODES.slice(), knownPictureModes: null,
+        taskManager: false, cards: [], closeIdleHome: true, shownCards: null, row: null, autorunWas: null, customApp: null, customSince: null, customHomeDisabled: false,
         showHomeSources: this.legacy('home'), useSourceImages: this.legacy('images'), connectedSourcesOnly: false, hideTvSource: false, appStore: 'tvstore'}; }
 };
 
@@ -385,8 +491,45 @@ Dock.prototype.previewList = function () {
 Dock.prototype.status = function (options) {
     var self = this;
     if (!(options && options.preview)) return Promise.resolve().then(function () { return self.statusNow(); });
-    // The dashboard's read also says where the TV's sound goes, for its note on what Vetro's volume bar can do there.
-    return Promise.all([this.previewList(), this.audioOutput()]).then(function (r) { return Promise.resolve(self.statusNow()).then(function (s) { return Object.assign(s, {audioOutput: r[1]}); }); });
+    // The dashboard's read also says where the TV's sound goes, for its note on what Vetro's volume bar can do there,
+    // and probes which Picture modes this TV actually offers.
+    return Promise.all([this.previewList(), this.audioOutput(), this.availablePictureModes()]).then(function (r) {
+        return Promise.resolve(self.statusNow()).then(function (s) { return Object.assign(s, {audioOutput: r[1]}); });
+    });
+};
+
+var PICTURE_MODES_TTL_MS = 60000, PICTURE_MODES_WAIT_MS = 4000;
+Dock.prototype.availablePictureModes = function () {
+    var self = this, now = this.now();
+    if (this.pictureModesCache && now - this.pictureModesCache.at < PICTURE_MODES_TTL_MS) return Promise.resolve(this.pictureModesCache.value);
+    if (!this.pictureModesRead) {
+        this.pictureModesRead = Promise.resolve().then(function () {
+            if (typeof self.execute !== 'function') return null;
+            return self.execute(CHECK_PICTURE_GROUP_CMD, 4000).then(function (r) {
+                var parsed = r && !r.exit_code && !r.timed_out ? parsePictureModesGroup(r.stdout) : null;
+                if (parsed !== null) return parsed;
+                return self.execute(CHECK_PICTURE_BUSCTL_CMD, 5000).then(function (r2) {
+                    return r2 && !r2.exit_code && !r2.timed_out ? parsePictureModesBusctl(r2.stdout) : null;
+                });
+            });
+        }).catch(function () { return null; }).then(function (names) {
+            self.pictureModesRead = null;
+            if (!Array.isArray(names) || names.length < 2) return null;
+            self.pictureModesCache = {at: self.now(), value: names};
+            if (fs.existsSync(self.stateFile)) {
+                try {
+                    var cur = self.readState().knownPictureModes;
+                    if (JSON.stringify(cur) !== JSON.stringify(names)) self.patchState({knownPictureModes: names});
+                } catch (e) { /* keep memory cache even if state write fails */ }
+            }
+            return names;
+        });
+    }
+    var read = this.pictureModesRead;
+    return new Promise(function (resolve) {
+        var t = setTimeout(function () { resolve(null); }, PICTURE_MODES_WAIT_MS);
+        read.then(function (v) { clearTimeout(t); resolve(v); });
+    });
 };
 
 // Where the TV's sound goes: Samsung's speaker selection (SoundTvOutputRoute: 0 TV speakers, 1 optical, 2 receiver on HDMI...),
@@ -445,8 +588,9 @@ Dock.prototype.bootSettled = function () {
 
 Dock.prototype.statusNow = function () {
     var self = this, state = this.readState();
+    var choices = (this.pictureModesCache && this.pictureModesCache.value) || state.knownPictureModes || FALLBACK_PICTURE_MODES.slice();
     var base = {installed: this.installed(), enabled: state.enabled, since: state.since, busy: this.busy,
-        error: this.lastError, failures: this.failures, homePictureClears: this.homePictureClears || 0, homePictureAgoSeconds: this.homePictureAt ? Math.round((this.now() - this.homePictureAt) / 1000) : null, apps: this.lastCatalog, fixTizenTube: state.fixTizenTube, noMotion: state.noMotion, volumePill: state.volumePill, volumeEdge: state.volumeEdge, numberPad: state.numberPad, taskManager: state.taskManager, cards: this.cardsEffective(state), cardChoices: this.cardChoices(), cardShards: this.cardShards(), cardsPaused: this.cardsPaused(state), maxCards: MAX_CARDS, closeIdleHome: state.closeIdleHome, idleHomeClears: this.idleHomeClears || 0, rowCustomised: !!state.row, showHomeSources: state.showHomeSources, useSourceImages: state.useSourceImages, connectedSourcesOnly: state.connectedSourcesOnly, hideTvSource: state.hideTvSource, appStore: state.appStore, autorunSwitchedOff: state.autorunWas === 1,
+        error: this.lastError, failures: this.failures, homePictureClears: this.homePictureClears || 0, homePictureAgoSeconds: this.homePictureAt ? Math.round((this.now() - this.homePictureAt) / 1000) : null, apps: this.lastCatalog, fixTizenTube: state.fixTizenTube, noMotion: state.noMotion, volumePill: state.volumePill, volumeEdge: state.volumeEdge, numberPad: state.numberPad, pictureCycle: state.pictureCycle, pictureModes: effectivePictureModes(state.pictureModes, choices), pictureModeChoices: choices, taskManager: state.taskManager, cards: this.cardsEffective(state), cardChoices: this.cardChoices(), cardShards: this.cardShards(), cardsPaused: this.cardsPaused(state), maxCards: MAX_CARDS, closeIdleHome: state.closeIdleHome, idleHomeClears: this.idleHomeClears || 0, rowCustomised: !!state.row, showHomeSources: state.showHomeSources, useSourceImages: state.useSourceImages, connectedSourcesOnly: state.connectedSourcesOnly, hideTvSource: state.hideTvSource, appStore: state.appStore, autorunSwitchedOff: state.autorunWas === 1,
         mode: state.customApp ? 'custom' : state.enabled ? 'vetro' : 'off', customApp: state.customApp, customSince: state.customSince,
         customHomeDisabled: state.customHomeDisabled,
         entries: this.entries(), inputs: this.inputEntries(), lastShardLaunch: this.lastShardLaunch, bootTimeline: this.timeline,
@@ -500,6 +644,12 @@ Dock.prototype.cardsShown = function () {
     return state.shownCards === null ? want.indexOf('shard:') < 0 : state.shownCards === want;
 };
 
+Dock.prototype.writePictureModesFile = function (modes) {
+    var list = cleanPictureModes(modes);
+    try { atomicFile.write(fs, this.pictureModesFile, list.join('\n') + '\n'); }
+    catch (e) { throw new Error('The picture modes list could not be saved: ' + e.message); }
+};
+
 // The launch line. Paths are fixed constants or come from this package's own folder, and are quoted.
 //
 // The dock runs as its own systemd service (a transient unit made by systemd-run), NOT as a child of the
@@ -522,6 +672,7 @@ Dock.prototype.startScript = function () {
         // The launcher calls Vetro for a tile a plugin took over and to save the row: on the port this build answers on.
         (servicePort(this.port) ? ' --service-port ' + servicePort(this.port) : '') +
         ' --home-code ' + HOME_CODE + ' --kill-on-home ' + HOME_KILL.join(',') + (state.noMotion && !state.customApp ? ' --no-motion' : '') + ' --volume-edge ' + state.volumeEdge +
+        ' --picture-modes-file ' + q(this.pictureModesFile) +
         // The Control center (Down from the apps row) is opt-in: without a card the dock looks and acts as before.
         (!state.customApp && this.cardsArg(state) ? ' --cards ' + this.cardsArg(state) : ' --no-tasks');
     return [
@@ -602,6 +753,7 @@ Dock.prototype.launch = function (quick) {
     var self = this, custom = this.readState().customApp, saved = !custom && quick && this.hasSavedApps();
     this.changes++;
     return (custom ? this.writeCustomList(custom) : saved ? Promise.resolve() : this.writeCatalog()).then(function () {
+        self.writePictureModesFile(self.readState().pictureModes);
         // Right after a boot systemd answers slowly, so the start script gets the long wait; a start that still runs
         // out of time is not a failure either (the dock usually comes up from that same attempt): waitRunning() decides.
         self.mark('startIssued');
@@ -1259,6 +1411,25 @@ Dock.prototype.setVolumeEdge = function (edge) {
 };
 // The same for the number pad that replaces Samsung's 123 pad.
 Dock.prototype.setNumberPad = function (on) { return this.setKeyOption('numberPad', on); };
+// Picture mode hold-to-cycle: toggle and chosen modes list (writes file without restarting launcher).
+Dock.prototype.setPictureCycle = function (on) { return this.setKeyOption('pictureCycle', on); };
+Dock.prototype.setPictureModes = function (list) {
+    if (!Array.isArray(list) || list.length < 2) return Promise.reject(new Error('Choose at least two picture modes'));
+    var known = (this.pictureModesCache && this.pictureModesCache.value) || this.readState().knownPictureModes;
+    var out = [];
+    for (var i = 0; i < list.length; i++) {
+        var m = list[i];
+        if (typeof m !== 'string' || PICTURE_MODES.indexOf(m) < 0) return Promise.reject(new Error('Unknown picture mode: ' + m));
+        if (known && known.indexOf(m) < 0) return Promise.reject(new Error('Unsupported picture mode on this TV: ' + m));
+        if (out.indexOf(m) >= 0) return Promise.reject(new Error('Duplicate picture mode: ' + m));
+        out.push(m);
+    }
+    try {
+        this.patchState({pictureModes: out});
+        this.writePictureModesFile(out);
+    } catch (e) { return Promise.reject(e); }
+    return this.status();
+};
 Dock.prototype.setKeyOption = function (name, on) {
     if (typeof on !== 'boolean') return Promise.reject(new Error('Invalid value'));
     var patch = {}; patch[name] = on;
@@ -1499,4 +1670,6 @@ Dock.prototype.checkCustomApp = function (appId) {
 };
 
 module.exports = {HOME_PICTURE_SCRIPT: HOME_PICTURE_SCRIPT, HOME_ON_SCREEN_AWK: HOME_ON_SCREEN_AWK, idleHomeScript: idleHomeScript, parseAudio: parseAudio, rowAfter: rowAfter, cleanRow: cleanRow, Dock: Dock, runningCheck: runningCheck, parseCheck: parseCheck, STATE_FILE: STATE_FILE, APPS_FILE: APPS_FILE, CUSTOM_APPS_FILE: CUSTOM_APPS_FILE,
-    customCandidate: customCandidate, customAppCheck: customAppCheck, hexLabel: hexLabel, LOG_FILE: LOG_FILE, shardCardText: shardCardText, cleanCards: cleanCards};
+    customCandidate: customCandidate, customAppCheck: customAppCheck, hexLabel: hexLabel, LOG_FILE: LOG_FILE, shardCardText: shardCardText, cleanCards: cleanCards,
+    PICTURE_MODES: PICTURE_MODES, DEFAULT_PICTURE_MODES: DEFAULT_PICTURE_MODES, FALLBACK_PICTURE_MODES: FALLBACK_PICTURE_MODES,
+    parsePictureModesGroup: parsePictureModesGroup, parsePictureModesBusctl: parsePictureModesBusctl, effectivePictureModes: effectivePictureModes};

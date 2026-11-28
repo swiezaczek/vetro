@@ -10,9 +10,10 @@
 //   still applies. A step that needs root is listed as blocked while the root agent is not connected; nothing waits.
 // - Loading switches off what the file has off; it never switches a Quick settings group back on.
 var FORMAT = 'vetro-settings', SCHEMA = 1, MAX_BYTES = 256 * 1024;
+var dockModule = require('./dock.js');
 var WIN_IDS = ['firmware', 'quickboot', 'multiscreen', 'ambient', 'telemetry', 'airplay', 'remotesupport', 'delivery', 'wifipresence'];
 // Launcher switches, in the order they are applied (before the launcher itself is switched on, which then starts with them).
-var DOCK_SWITCHES = ['fixTizenTube', 'closeIdleHome', 'volumePill', 'numberPad', 'noMotion', 'showHomeSources', 'useSourceImages', 'connectedSourcesOnly', 'hideTvSource'];
+var DOCK_SWITCHES = ['fixTizenTube', 'closeIdleHome', 'volumePill', 'numberPad', 'pictureCycle', 'noMotion', 'showHomeSources', 'useSourceImages', 'connectedSourcesOnly', 'hideTvSource'];
 var DOCK_ROOT = {showHomeSources: true, useSourceImages: true, connectedSourcesOnly: true, hideTvSource: true};     // these read the TV's sources even with the launcher off
 var EDGES = ['left', 'right', 'top', 'bottom', 'hidden'], STORES = ['tvstore', 'samsung'];
 var ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,120}$/, CARD_RE = /^(?:tasks|audio|picture|sleep|shard:[A-Za-z0-9._-]{1,64})$/;
@@ -23,7 +24,7 @@ var WIN_LABELS = {firmware: 'Block firmware and software updates', quickboot: 'Q
     telemetry: 'Stop viewing-data collection', airplay: 'Disable AirPlay', remotesupport: 'Disable Samsung remote support', delivery: 'Disable background app delivery',
     wifipresence: 'Disable Wi-Fi presence'};
 var DOCK_LABELS = {fixTizenTube: 'Fix TizenTube', closeIdleHome: 'Close idle Samsung Home', volumePill: 'Volume bar', numberPad: 'Number pad',
-    noMotion: 'Reduce motion', showHomeSources: 'HDMI sources on Home', useSourceImages: 'HDMI source images', connectedSourcesOnly: 'Connected sources only', hideTvSource: 'Hide TV on Sources'};
+    pictureCycle: 'Picture mode', noMotion: 'Reduce motion', showHomeSources: 'HDMI sources on Home', useSourceImages: 'HDMI source images', connectedSourcesOnly: 'Connected sources only', hideTvSource: 'Hide TV on Sources'};
 var MQTT_FIELDS = ['enabled', 'host', 'port', 'tls', 'ca', 'username', 'topicPrefix', 'deviceName'];
 // Groups loading never switches off: Samsung Home has its own warning (the TV may not start without it).
 var QUICK_NEVER = ['samsung-home'];
@@ -42,12 +43,16 @@ function same(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
 function build(src) {
     var s = {}, notRead = {};
     var d = src.dock;
-    if (d) s.launcher = {mode: d.customApp ? 'custom' : d.enabled ? 'vetro' : 'off', customApp: d.customApp || null,
-        fixTizenTube: bool(d.fixTizenTube), closeIdleHome: d.closeIdleHome !== false, volumePill: bool(d.volumePill), numberPad: bool(d.numberPad),
-        noMotion: bool(d.noMotion), showHomeSources: bool(d.showHomeSources), useSourceImages: bool(d.useSourceImages), connectedSourcesOnly: bool(d.connectedSourcesOnly), hideTvSource: bool(d.hideTvSource),
-        volumeEdge: EDGES.indexOf(d.volumeEdge) >= 0 ? d.volumeEdge : 'left', appStore: d.appStore === 'samsung' ? 'samsung' : 'tvstore',
-        cards: ids(d.cards, CARD_RE, 3)};
-    else notRead.launcher = 'unreadable';
+    if (d) {
+        var picModes = ids(d.pictureModes, /^.+$/, dockModule.PICTURE_MODES.length).filter(function (m) { return dockModule.PICTURE_MODES.indexOf(m) >= 0; });
+        s.launcher = {mode: d.customApp ? 'custom' : d.enabled ? 'vetro' : 'off', customApp: d.customApp || null,
+            fixTizenTube: bool(d.fixTizenTube), closeIdleHome: d.closeIdleHome !== false, volumePill: bool(d.volumePill), numberPad: bool(d.numberPad),
+            pictureCycle: bool(d.pictureCycle),
+            pictureModes: picModes.length >= 2 ? picModes : dockModule.DEFAULT_PICTURE_MODES.slice(),
+            noMotion: bool(d.noMotion), showHomeSources: bool(d.showHomeSources), useSourceImages: bool(d.useSourceImages), connectedSourcesOnly: bool(d.connectedSourcesOnly), hideTvSource: bool(d.hideTvSource),
+            volumeEdge: EDGES.indexOf(d.volumeEdge) >= 0 ? d.volumeEdge : 'left', appStore: d.appStore === 'samsung' ? 'samsung' : 'tvstore',
+            cards: ids(d.cards, CARD_RE, 3)};
+    } else notRead.launcher = 'unreadable';
     if (src.tuner) s.tuner = {enabled: bool(src.tuner.enabled)}; else notRead.tuner = 'unreadable';
     if (Array.isArray(src.rules)) s.remapper = {rules: src.rules}; else notRead.remapper = 'unreadable';
     if (src.wins) {
@@ -94,6 +99,8 @@ function parse(file) {
         return obj(v) && ['vetro', 'custom', 'off'].indexOf(v.mode) >= 0 && (v.mode !== 'custom' || (typeof v.customApp === 'string' && ID_RE.test(v.customApp))) &&
             DOCK_SWITCHES.every(function (k) { return v[k] === undefined || isBool(v[k]); }) &&
             (v.volumeEdge === undefined || EDGES.indexOf(v.volumeEdge) >= 0) && (v.appStore === undefined || STORES.indexOf(v.appStore) >= 0) &&
+            (v.pictureModes === undefined || (Array.isArray(v.pictureModes) && v.pictureModes.length >= 2 && v.pictureModes.length <= dockModule.PICTURE_MODES.length &&
+                v.pictureModes.every(function (m, i, a) { return typeof m === 'string' && dockModule.PICTURE_MODES.indexOf(m) >= 0 && a.indexOf(m) === i; }))) &&
             (v.cards === undefined || (Array.isArray(v.cards) && v.cards.length <= 3 && v.cards.every(function (c) { return typeof c === 'string' && CARD_RE.test(c); })));
     });
     take('tuner', function (v) { return obj(v) && isBool(v.enabled); });
@@ -158,6 +165,7 @@ function plan(want, cur) {
     section('remapper', function (f, now) { if (!same(f.rules, now.rules)) step('remapper', f.rules.length + ' Remapper rule' + (f.rules.length === 1 ? '' : 's'), '/remap', {rules: f.rules}, false); });
     section('launcher', function (f, now) {
         var running = now.mode !== 'off';
+        if (f.pictureModes && !same(f.pictureModes, now.pictureModes)) step('launcher', 'Picture modes', '/dock', {action: 'pictureModes', modes: f.pictureModes}, false);
         DOCK_SWITCHES.forEach(function (k) {
             if (f[k] === undefined || f[k] === now[k]) return;
             step('launcher', DOCK_LABELS[k] + (f[k] ? ' on' : ' off'), '/dock', {action: k, on: f[k]}, DOCK_ROOT[k] || (running && k === 'noMotion'));

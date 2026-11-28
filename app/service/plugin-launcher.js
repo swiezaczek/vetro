@@ -101,6 +101,8 @@ function definition(dock, options) {
                 if (p.action === 'volumePill') return dock.setVolumePill(p.on);
                 if (p.action === 'volumeEdge') return dock.setVolumeEdge(p.edge);
                 if (p.action === 'numberPad') return dock.setNumberPad(p.on);
+                if (p.action === 'pictureCycle') return dock.setPictureCycle(p.on);
+                if (p.action === 'pictureModes') return dock.setPictureModes(p.modes);
                 if (p.action === 'cards') return dock.setCards(p.cards);
                 if (p.action === 'resetRow') return dock.resetRow();
                 if (p.action === 'appStore') return dock.setAppStore(p.store);

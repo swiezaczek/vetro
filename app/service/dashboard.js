@@ -460,8 +460,13 @@ button:active:not(:disabled){transform:translateY(1px)}
  .ui-overview{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
  .ui-overview>.dock-left{grid-column:1;grid-row:1}.ui-overview>#uiParts{grid-column:2;grid-row:1/span 2}.ui-overview>#uiRel{grid-column:1;grid-row:2}
  .ui-osd{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
- .ui-osd>.dock-left{grid-column:1;grid-row:1/span 2}.ui-osd>#osdParts{grid-column:2;grid-row:1}.ui-osd>#osdNeeds{grid-column:2;grid-row:2}
+ .ui-osd>.dock-left{grid-column:1;grid-row:1}.ui-osd>#osdParts{grid-column:2;grid-row:1/span 2}.ui-osd>#osdNeeds{grid-column:1;grid-row:2}
 }
+.quick-item>.pic-chips,.quick-item>.pic-hint{grid-column:1/-1}
+.pic-chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:var(--s1)}
+.pic-chips button{min-height:var(--vetro-control-height);height:auto;padding:var(--s1) 12px;border-radius:var(--pill);font-size:var(--fs-s);background:var(--raised);color:var(--muted);border-color:var(--vetro-control-border)}
+.pic-chips button[aria-pressed=true]{color:var(--accent);background:var(--accent-soft);border-color:var(--accent-line);font-weight:500}
+.quick-item>.pic-hint{margin-top:0}
 ${tunerPage.css}</style></head><body>
 <header class="topbar"><span class="brand-mini"><img src="/icon.png" alt="" width="32" height="32">vetro</span><button type="button" id="menuBtn" class="menu-btn" aria-expanded="false" aria-controls="sidebar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>Menu</button></header><div class="scrim" id="scrim"></div>
 <aside class="sidebar" id="sidebar"><div class="brand"><img src="/icon.png" alt="" width="44" height="44"><span>vetro<small id="connection">Checking…</small></span></div><button type="button" id="closeMenu" class="menu-close">Close menu ×</button><nav aria-label="Main"><button data-tab="quick" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>Quick settings</button><button data-tab="vetroui" aria-current="false" title="Vetro UI · Launcher, live TV, on-screen displays"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><rect x="6.5" y="11.5" width="11" height="2.5" rx="1.25"/><path d="M8 20h8M12 16v4"/></svg>Vetro UI<span class="chip nav-count">Preview</span></button><button data-tab="plugins" aria-current="false" title="Vetro Shards · Plugin system"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3h9l-4 7-6-2 1-5ZM16 3h5v15l-9-7 4-8ZM3 12l6 3 8 6H3v-9Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>Vetro Shards</button><button data-tab="remote" aria-current="false"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2" width="10" height="20" rx="3"/><circle cx="12" cy="8" r="2"/><path d="M10 15h4M10 18h4"/></svg>Remapper</button></nav><div class="nav-label">TV</div><nav aria-label="TV"><button data-tab="apps" aria-current="false"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Apps and processes</button><button data-tab="dashboard" aria-current="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 18a8.5 8.5 0 1 1 15 0"/><path d="m12 14 4-5"/><circle cx="12" cy="14" r="1.2"/></svg>Resource monitor</button><button data-tab="tvsettings" aria-current="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"/><circle cx="8" cy="6" r="2"/><circle cx="16" cy="12" r="2"/><circle cx="9" cy="18" r="2"/></svg>Settings and controls</button></nav><div class="nav-label">Connections</div><nav aria-label="Connections"><button data-tab="dns" aria-current="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m6 6 12 12"/></svg>DNS blocking</button><button data-tab="mqtt" aria-current="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10v9.5h13V10"/><path d="M9.5 15.5c1.3-1.6 3.7-1.6 5 0M7.5 13c2.5-2.6 6.5-2.6 9 0"/><circle cx="12" cy="17.6" r=".8"/></svg>Home Assistant</button></nav><div class="side-low"><button type="button" data-tab="actions" class="quiet" aria-current="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1L3.5 8.5"/><path d="M3.5 3.8v4.7h4.7M12 7.5V12l3 2"/></svg>Session history<span id="actionsCount" class="chip nav-count" hidden></span></button><button type="button" id="aboutBtn" class="about-btn" aria-haspopup="dialog"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.6v.01"/></svg>About Vetro</button></div><footer><span id="appVersion"></span></footer></aside>
@@ -602,7 +607,7 @@ $('overlay').onclick=closeDetail;document.addEventListener('keydown',function(e)
 $('appGrid').onclick=function(e){var b=e.target.closest('[data-app]');if(b)detail(b.dataset.app)};$('search').oninput=render;$('category').onchange=render;$('refresh').onclick=function(){loadApps(true)};
 function showRules(){renderMqttRules();
  var lock='<svg class="lock-icon" viewBox="0 0 24 24" role="img" aria-label="Locked"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V6a4 4 0 0 1 8 0v4"/></svg>';
- var held=reservedKeys.map(function(k){return '<div class="rule rule-locked" data-held="'+esc(k.code)+'"><div>'+lock+' '+(k.icon?remoteKey(k.icon,k.label)+' ':'')+'Key <code>'+esc(k.code)+'</code> ('+esc(k.label)+') → '+esc(k.name)+' <span class="muted">Vetro UI'+(k.live?'':' · waits for a launcher')+'</span></div><button data-open-ui="osd">Open Vetro UI</button></div>'}).join('');
+ var held=reservedKeys.map(function(k){return '<div class="rule rule-locked" data-held="'+esc(k.code)+'"><div>'+lock+' '+(k.icon?remoteKey(k.icon,k.label)+' ':'')+(k.hold?'Hold ':'')+'Key <code>'+esc(k.code)+'</code> ('+esc(k.label)+') → '+esc(k.name)+' <span class="muted">Vetro UI'+(k.live?'':' · waits for a launcher')+'</span></div><button data-open-ui="osd">Open Vetro UI</button></div>'}).join('');
  var mine=rules.map(function(r){var a=r.actions[0],name=a.type==='launch'?appLabel(inventory.find(function(x){return x.appId===a.appId})||{appId:a.appId}):a.type==='key'?inputKeyLabel(a.key):a.type==='screenoff'?'Turn off screen':a.type;var over=r.enabled&&r.trigger.type==='physical'&&reservedKeys.some(function(k){return k.live&&k.code===String(r.trigger.value)});var tk=!over&&remapTuner&&r.enabled&&r.trigger.type==='physical'?UI_TUNER_KEYS.filter(function(k){return k.code===String(r.trigger.value)})[0]:null;return '<div class="rule"><div>'+(r.trigger.type==='physical'?'Key <code>'+esc(r.trigger.value)+'</code>':'<code>'+esc(r.trigger.type)+' / '+esc(r.trigger.value)+'</code>')+' → '+esc(name)+whenTag(r)+' <span class="muted">'+(r.enabled?'':'(off)')+'</span>'+(over?' <span class="tag">Overridden by Vetro UI</span>':'')+(tk?' <span class="tag">Live TV does not get '+esc(tk.label)+'</span>':'')+'</div><button class="danger" data-delete="'+esc(r.id)+'">Delete shortcut</button></div>'}).join('');
  $('rules').innerHTML=held||mine?held+mine:'No shortcuts yet. Capture a key and choose what it does.'}
 function loadRules(){return api('/remap').then(function(d){if(!Array.isArray(d.rules))throw Error('Shortcut list unreadable');rules=d.rules;reservedKeys=Array.isArray(d.reserved)?d.reserved:[];remapTuner=!!(d.tuner&&d.tuner.enabled);showRules()}).catch(function(e){$('rules').textContent='Could not read the saved shortcuts: '+e.message})}
@@ -1677,7 +1682,7 @@ function setDock(action,label,extra){
  if(dockBusy)return;dockBusy=true;dockConfirm=false;customConfirm=false;renderDock();renderUi();   // the Overview's and the displays' switches lock too
  return runUiOperation('dock',label,'Launcher',null,function(mark){return api('/dock',Object.assign({action:action},extra||{})).then(function(d){
   dockSeq++;dockData=d;launcherEnabled=launcherOn(d);dockError=null;if(action==='cards'){cardsDraft=null;cardsPick=null}
-  var message=action==='appStore'?'All apps now opens '+(d.appStore==='samsung'?'Samsung’s store':'TV-Store')+(d.enabled?'; the launcher was restarted.':'.'):action==='enableCustom'?'Custom launcher on'+(d.running?' and running':'')+'. Press Home on the remote to open it.':action==='disableCustom'?'Custom launcher off. Home opens Samsung Home.':action==='enable'?'Launcher on'+(d.running?' and running':'')+'. Press Home on the remote to open it.':action==='disable'?'Launcher off. Home opens Samsung Home.':action==='showHomeSources'||action==='useSourceImages'?'Source preference saved; '+(d.enabled?'the launcher was restarted.':'the preview was updated.'):action==='fixTizenTube'?'Fix TizenTube '+(d.fixTizenTube?'on':'off')+(d.enabled?'; the launcher was restarted with the new list.':'; it applies when the launcher is on.'):action==='noMotion'?'Reduce motion '+(d.noMotion?'on':'off')+(d.enabled?'; the launcher was restarted.':'; it applies when the launcher is on.'):action==='closeIdleHome'?'Close idle Samsung Home '+(d.closeIdleHome!==false?'on':'off')+(d.enabled?'.':'; it applies when the launcher is on.'):action==='resetRow'?'Samsung’s row is back'+(d.enabled?'; the launcher was restarted.':'.'):action==='cards'?'Control center: '+(dockCards(d).length?dockCards(d).map(function(c){return cardInfo(c,d).name}).join(', '):'off')+(d.enabled?'; the launcher was restarted.':d.mode==='custom'?'; it shows in the Vetro launcher only.':'; it applies when the launcher is on.'):action==='volumePill'?'Volume bar '+(d.volumePill?'on.':'off: Samsung’s bar is back.'):action==='numberPad'?'Number pad '+(d.numberPad?'on.':'off: Samsung’s pad is back.'):action==='volumeEdge'?(d.volumeEdge==='hidden'?'The volume bar is hidden: Vol changes the level without a bar':'The volume bar moves to the '+(d.volumeEdge||'left')+' edge')+(d.enabled?'; the launcher was restarted.':'.'):'App list rebuilt and the launcher restarted.';
+  var message=action==='appStore'?'All apps now opens '+(d.appStore==='samsung'?'Samsung’s store':'TV-Store')+(d.enabled?'; the launcher was restarted.':'.'):action==='enableCustom'?'Custom launcher on'+(d.running?' and running':'')+'. Press Home on the remote to open it.':action==='disableCustom'?'Custom launcher off. Home opens Samsung Home.':action==='enable'?'Launcher on'+(d.running?' and running':'')+'. Press Home on the remote to open it.':action==='disable'?'Launcher off. Home opens Samsung Home.':action==='showHomeSources'||action==='useSourceImages'?'Source preference saved; '+(d.enabled?'the launcher was restarted.':'the preview was updated.'):action==='fixTizenTube'?'Fix TizenTube '+(d.fixTizenTube?'on':'off')+(d.enabled?'; the launcher was restarted with the new list.':'; it applies when the launcher is on.'):action==='noMotion'?'Reduce motion '+(d.noMotion?'on':'off')+(d.enabled?'; the launcher was restarted.':'; it applies when the launcher is on.'):action==='closeIdleHome'?'Close idle Samsung Home '+(d.closeIdleHome!==false?'on':'off')+(d.enabled?'.':'; it applies when the launcher is on.'):action==='resetRow'?'Samsung’s row is back'+(d.enabled?'; the launcher was restarted.':'.'):action==='cards'?'Control center: '+(dockCards(d).length?dockCards(d).map(function(c){return cardInfo(c,d).name}).join(', '):'off')+(d.enabled?'; the launcher was restarted.':d.mode==='custom'?'; it shows in the Vetro launcher only.':'; it applies when the launcher is on.'):action==='volumePill'?'Volume bar '+(d.volumePill?'on.':'off: Samsung’s bar is back.'):action==='numberPad'?'Number pad '+(d.numberPad?'on.':'off: Samsung’s pad is back.'):action==='pictureCycle'?'Picture mode '+(d.pictureCycle?'on.':'off.'):action==='pictureModes'?'Picture modes saved ('+picModesOf(d).length+' modes).':action==='volumeEdge'?(d.volumeEdge==='hidden'?'The volume bar is hidden: Vol changes the level without a bar':'The volume bar moves to the '+(d.volumeEdge||'left')+' edge')+(d.enabled?'; the launcher was restarted.':'.'):'App list rebuilt and the launcher restarted.';
   mark(message,'Service confirmed');return {state:'success',resultLabel:'Service confirmed',message:message};
  })}).then(function(ok){if(!ok)return loadDock()}).finally(function(){dockBusy=false;renderDock();renderQuick();renderUi();if(action==='enableCustom'||action==='disableCustom')loadApps(true)});
 }
@@ -1774,7 +1779,7 @@ function uiNeedNotes(part){
  if(n.indexOf('launcher')>=0)out+=chip('Needs a launcher','partial');
  if(n.indexOf('interception')>=0)out+=chip('Needs the remote interception','partial');
  if(n.indexOf('listening')>=0)out+=chip('Paused: the Remapper is listening','partial');
- var c=uiConflicts(uiRules||[],uiKeysOf(part));if(c.length)out+=chip(c.length+' shortcut'+(c.length===1?'':'s')+' of yours on the same key'+(c.length===1?'':'s'),'partial');
+ var c=uiConflicts(uiRules||[],uiKeysOf(part,d));if(c.length)out+=chip(c.length+' shortcut'+(c.length===1?'':'s')+' of yours on the same key'+(c.length===1?'':'s'),'partial');
  return out;
 }
 // One row of the overview: what the part is, its state, its switch (or the place where it is chosen).
@@ -1797,14 +1802,34 @@ function audioOutputNote(d){
 }
 function audioOutputMarkup(d){var n=audioOutputNote(d);return n?'<p class="notice" data-audio-note>'+esc(n.text)+'</p>':''}
 function edgeText(edge){return edge==='hidden'?'Hidden: Vol changes the level, no bar.':'On the '+edge+' edge.'}
+var PIC_DEFAULT_MODES=['Movie','Filmmaker Mode'];
+var PIC_DEFAULT_CHOICES=['Dynamic','Standard','Movie','Filmmaker Mode'];
+var picModeHint='';
+function picChoicesOf(d){return d&&Array.isArray(d.pictureModeChoices)&&d.pictureModeChoices.length>=2?d.pictureModeChoices:PIC_DEFAULT_CHOICES}
+function picModesOf(d){
+ var choices=picChoicesOf(d),raw=d&&Array.isArray(d.pictureModes)?d.pictureModes:PIC_DEFAULT_MODES,out=[];
+ raw.forEach(function(m){if(choices.indexOf(m)>=0&&out.indexOf(m)<0)out.push(m)});
+ if(out.length>=2)return out;
+ PIC_DEFAULT_MODES.forEach(function(m){if(choices.indexOf(m)>=0&&out.indexOf(m)<0)out.push(m)});
+ choices.forEach(function(m){if(out.length<2&&out.indexOf(m)<0)out.push(m)});
+ return out;
+}
+function osdOwner(name){return name==='volumePill'?'volume':name==='numberPad'?'pad':'picture'}
+function osdPartName(name){return name==='volumePill'?'volume bar':name==='numberPad'?'number pad':'picture mode'}
+function togglePicMode(name){
+ var modes=picModesOf(dockData),idx=modes.indexOf(name);
+ if(idx>=0){if(modes.length<=2){picModeHint='Keep at least two modes selected.';say(picModeHint);renderOsd();return}picModeHint='';return setDock('pictureModes','Update picture modes',{modes:modes.filter(function(m){return m!==name})})}
+ picModeHint='';return setDock('pictureModes','Update picture modes',{modes:modes.concat([name])});
+}
 // The Overview's slideshow: what each part puts on the screen, with the key that brings it up.
 function overviewSlides(d){
- var edge=d&&d.volumeEdge||'left';
+ var edge=d&&d.volumeEdge||'left',modes=picModesOf(d);
  return [
   {title:'Vetro launcher',keys:remoteKey('home','Home'),text:'Your apps in one row. Up opens Sources.',svg:lpMarkup(d||{},'lp-rise'),ms:6500},
   {title:'TV guide',keys:remoteKey('pad-up','Up'),text:'Up, while watching live TV.',svg:UI_GUIDE_SCENE,ms:8000},
   {title:'Volume bar',keys:remoteKey('rocker-vol-up','Vol +'),text:edgeText(edge),svg:osdVolumePreview(edge,62)},
   {title:'Number pad',keys:remoteKey('color-123','123'),text:'Pick a channel by number.',svg:osdPadPreview()},
+  {title:'Picture mode',keys:'<kbd class="keycap">Hold Settings</kbd>',text:'Switches between '+modes.join(', ')+'.',svg:osdPicturePreview(modes)},
   {title:'Control center',keys:remoteKey('pad-down','Down'),text:'Running apps and audio output from the Dock.',svg:osdTasksPreview()}
  ];
 }
@@ -1827,16 +1852,17 @@ function renderOverview(){
   home.push(uiRow('tasks','Control center','Down on the apps row: up to '+(d.maxCards||3)+' cards'+(cc.length?' ('+cc.map(function(c){return esc(cardInfo(c,d).name)}).join(', ')+')':'')+'.',chip(cc.length?'On':'Off',cc.length?'on':'')+(cc.length&&uiLauncherMode(d)!=='vetro'?chip('Needs the Vetro launcher','partial'):''),switchMarkup('data-ui-tasks',cc.length>0,dockBusy||!d.installed,'Control center'),'launcher','cards'));
   rows.push(uiRow('volume','Volume bar','Vol and Mute show Vetro’s bar instead of Samsung’s.',chip(d.volumePill?'On':'Off',d.volumePill?'on':'')+(d.volumePill?uiNeedNotes('volume'):''),switchMarkup('data-ui-osd="volumePill"',!!d.volumePill,dockBusy||!d.installed,'Volume bar'),'osd'));
   rows.push(uiRow('pad','Number pad','123 opens Vetro’s pad instead of Samsung’s.',chip(d.numberPad?'On':'Off',d.numberPad?'on':'')+(d.numberPad?uiNeedNotes('pad'):''),switchMarkup('data-ui-osd="numberPad"',!!d.numberPad,dockBusy||!d.installed,'Number pad'),'osd'));
+  rows.push(uiRow('picture','Picture mode','Hold Settings or 123 on the remote to switch between your chosen picture modes.',chip(d.pictureCycle?'On':'Off',d.pictureCycle?'on':'')+(d.pictureCycle?uiNeedNotes('picture'):''),switchMarkup('data-ui-osd="pictureCycle"',!!d.pictureCycle,dockBusy||!d.installed,'Picture mode'),'osd'));
  }
  var rel='<section class="quick-group" aria-labelledby="uiRelTitle"><h2 class="section-title" id="uiRelTitle">${sectionIcon('keys')}How they fit together</h2><ul class="ui-rules">'+
   '<li><strong>One launcher on Home:</strong> Samsung’s Home, the Vetro launcher or another app.</li>'+
-  '<li><strong>The Volume bar and Number pad are drawn by the launcher</strong>, so they need one on the Home key.</li>'+
+  '<li><strong>The Volume bar, Number pad and Picture mode are drawn by the launcher</strong>, so they need one on the Home key.</li>'+
   '<li><strong>Their keys come through the Remapper’s interception</strong>, which Vetro UI turns on for you.</li>'+
   '<li><strong>Vetro UI comes first:</strong> shortcuts on the same key pause after you confirm.</li>'+
   '<li><strong>Live TV runs on its own.</strong></li></ul></section>';
- var key=d?[d.volumeEdge||'left',(d.entries||[]).length,dockCards(d).join('+'),!!d.noMotion,!!d.useSourceImages].join(','):'none';   // what the pictures show
+ var key=d?[d.volumeEdge||'left',(d.entries||[]).length,dockCards(d).join('+'),!!d.noMotion,!!d.useSourceImages,picModesOf(d).join('|')].join(','):'none';   // what the pictures show
  // Two boxes: what the Home key opens (the launcher and its Control center), then live TV and the on-screen displays.
- var parts='<section class="quick-group" aria-label="Launcher and Control center">'+home.join('')+'</section><section class="quick-group" aria-label="Live TV, Volume bar and Number pad">'+rows.join('')+'</section>';
+ var parts='<section class="quick-group" aria-label="Launcher and Control center">'+home.join('')+'</section><section class="quick-group" aria-label="Live TV and on-screen displays">'+rows.join('')+'</section>';
  if(uiShowKey===key&&box.firstChild&&$('uiParts')){paint($('uiParts'),parts);paint($('uiRel'),rel);return}
  uiShowKey=key;
  box.innerHTML='<div class="dock-layout ui-overview"><div class="dock-left panel"><h3>On your TV</h3><p class="section-note">Sample apps and channels.</p>'+showreel('overview',overviewSlides(d),'What Vetro UI draws on the TV')+'</div><div class="ui-parts" id="uiParts">'+parts+'</div><div id="uiRel">'+rel+'</div></div>';
@@ -1864,12 +1890,12 @@ function switchLauncher(target){
  });
 }
 function osdConflictMarkup(name){
- if(osdAsk!==name)return '';var c=uiConflicts(uiRules||[],uiKeysOf(name==='volumePill'?'volume':'pad')),part=name==='volumePill'?'volume bar':'number pad';
- return '<div class="inline-confirm" role="group" aria-label="Confirm shortcut conflict"><p><strong>'+(c.length===1?'One of your shortcuts uses':c.length+' of your shortcuts use')+' the same key.</strong> '+c.map(function(x){return 'Key '+esc(x.label)+' ('+esc(x.code)+') opens '+esc(ruleName(x.rule))}).join('; ')+'. While the '+part+' is on, Vetro UI’s keys come first and '+(c.length===1?'this shortcut does':'these shortcuts do')+' not run. '+(c.length===1?'It stays saved and works':'They stay saved and work')+' again when you turn the '+part+' off.</p><div class="row"><button data-osd-cancel>Cancel</button><button class="primary" data-osd-confirm="'+name+'">Turn on anyway</button></div></div>';
+ if(osdAsk!==name)return '';var c=uiConflicts(uiRules||[],uiKeysOf(osdOwner(name),dockData)),part=osdPartName(name);
+ return '<div class="inline-confirm" role="group" aria-label="Confirm shortcut conflict"><p><strong>'+(c.length===1?'One of your shortcuts uses':c.length+' of your shortcuts use')+' the same key.</strong> '+c.map(function(x){return 'Key '+esc(x.label)+' ('+esc(x.code)+') opens '+esc(ruleName(x.rule))}).join('; ')+'. While the '+esc(part)+' is on, Vetro UI’s keys come first and '+(c.length===1?'this shortcut does':'these shortcuts do')+' not run. '+(c.length===1?'It stays saved and works':'They stay saved and work')+' again when you turn the '+esc(part)+' off.</p><div class="row"><button data-osd-cancel>Cancel</button><button class="primary" data-osd-confirm="'+esc(name)+'">Turn on anyway</button></div></div>';
 }
 function osdToggle(name,on,confirmed){
- var label=(on?'Turn on the ':'Turn off the ')+(name==='volumePill'?'volume bar':'number pad');
- if(on&&!confirmed&&uiConflicts(uiRules||[],uiKeysOf(name==='volumePill'?'volume':'pad')).length){osdAsk=name;renderUi();if(uiTab!=='osd')showUiTab('osd');var q=document.querySelector('[data-osd-confirm]');if(q)q.focus();return}
+ var label=(on?'Turn on the ':'Turn off the ')+osdPartName(name);
+ if(on&&!confirmed&&uiConflicts(uiRules||[],uiKeysOf(osdOwner(name),dockData)).length){osdAsk=name;renderUi();if(uiTab!=='osd')showUiTab('osd');var q=document.querySelector('[data-osd-confirm]');if(q)q.focus();return}
  osdAsk=null;
  return Promise.resolve(setDock(name,label,{on:!!on})).then(loadUiInput);
 }
@@ -1877,21 +1903,25 @@ var osdShowKey=null;
 function renderOsd(){
  var box=$('osd');if(!box)return;var d=dockData;
  if(!d){osdShowKey=null;box.innerHTML='<div class="panel"><p class="notice">'+esc(uiErr(dockError)||'Reading…')+'</p></div>';return}
- var mode=uiLauncherMode(d),st=uiInput&&uiInput.status,pref=st&&st.preference,anyOn=d.volumePill||d.numberPad;
+ var mode=uiLauncherMode(d),st=uiInput&&uiInput.status,pref=st&&st.preference,anyOn=d.volumePill||d.numberPad||d.pictureCycle;
  var host=mode==='vetro'?'<p class="notice">Drawn by the Vetro launcher.</p>':mode==='custom'?'<p class="notice">Drawn by Vetro while '+esc(customName(d.customApp))+' is the launcher.</p>':
   '<div class="quick-callout"><p>Turn on a launcher to use these displays.</p><div class="quick-actions"><button data-ui-open="launcher" data-dock-open="vetro">Choose a launcher</button></div></div>';
  var inter=!uiInput?'<p class="notice">'+(uiInputError?'The remote interception could not be read ('+esc(uiInputError)+'). Open this page again to retry.':'Reading the remote interception…')+'</p>':pref&&pref.enabled?'<p class="notice">Remote interception on'+(uiInterception&&uiInterception.auto?', turned on by Vetro UI':'')+(st.policy&&st.policy.connected?'':' (connecting)')+'. Their keys are locked in the Remapper.</p>':
-  '<div class="quick-callout"><p>The remote interception is off'+(anyOn?', so Vol and 123 still go to Samsung':'')+'. It turns on when you switch one of these on'+(uiInterception&&uiInterception.problem?'; last try: '+esc(uiInterception.problem):'')+'.</p><div class="quick-actions"><button data-ui-remote>Open the Remapper</button></div></div>';
+  '<div class="quick-callout"><p>The remote interception is off'+(anyOn?', so Vol, 123 and Settings still go to Samsung':'')+'. It turns on when you switch one of these on'+(uiInterception&&uiInterception.problem?'; last try: '+esc(uiInterception.problem):'')+'.</p><div class="quick-actions"><button data-ui-remote>Open the Remapper</button></div></div>';
  var needs='<section class="quick-group" aria-labelledby="osdNeedsTitle"><h2 class="section-title" id="osdNeedsTitle">${sectionIcon('access')}What they need</h2>'+host+inter+'</section>';
- var edge=d.volumeEdge||'left';
+ var edge=d.volumeEdge||'left',modes=picModesOf(d),choices=picChoicesOf(d);
  var vol='<div class="quick-item" data-quick-item="volume-pill"><div><h3>Volume bar</h3><p>Vol and Mute show Vetro’s bar instead of Samsung’s. With a receiver on HDMI, a soundbar on optical or Bluetooth headphones, Vol goes to Samsung and its bar shows.</p><div class="quick-state">'+chip(d.volumePill?'On':'Off',d.volumePill?'on':'')+(d.volumePill?uiNeedNotes('volume'):'')+'</div><label class="quick-edge">Position <select data-osd-edge aria-label="Volume bar position"'+(dockBusy||!d.installed?' disabled':'')+'>'+['left','right','top','bottom','hidden'].map(function(e){return '<option value="'+e+'"'+(edge===e?' selected':'')+'>'+e.charAt(0).toUpperCase()+e.slice(1)+'</option>'}).join('')+'</select></label>'+audioOutputMarkup(d)+'</div>'+switchMarkup('data-osd="volumePill"',!!d.volumePill,dockBusy||!d.installed,'Volume bar')+osdConflictMarkup('volumePill')+'</div>';
  var pad='<div class="quick-item" data-quick-item="number-pad"><div><h3>Number pad</h3><p>123 opens Vetro’s pad instead of Samsung’s.</p><div class="quick-state">'+chip(d.numberPad?'On':'Off',d.numberPad?'on':'')+(d.numberPad?uiNeedNotes('pad'):'')+'</div></div>'+switchMarkup('data-osd="numberPad"',!!d.numberPad,dockBusy||!d.installed,'Number pad')+osdConflictMarkup('numberPad')+'</div>';
- // The preview beside the switches, as on the other tabs; drawn again only when the bar moves to another edge.
- if(osdShowKey===edge&&box.firstChild&&$('osdParts')){paint($('osdParts'),vol+pad);paint($('osdNeeds'),needs);return}
- osdShowKey=edge;
+ var modeChips=d.pictureCycle?'<div class="pic-chips" role="group" aria-label="Picture modes to cycle">'+choices.map(function(m){var on=modes.indexOf(m)>=0;return '<button type="button" data-pic-mode="'+esc(m)+'" aria-pressed="'+(on?'true':'false')+'"'+(dockBusy||!d.installed?' disabled':'')+'>'+esc(m)+'</button>'}).join('')+'</div>'+(picModeHint?'<p class="section-note pic-hint" role="status">'+esc(picModeHint)+'</p>':''):'';
+ var pic='<div class="quick-item" data-quick-item="picture-cycle"><div><h3>Picture mode</h3><p>Hold Settings or 123 on the remote to switch between your chosen picture modes.</p><div class="quick-state">'+chip(d.pictureCycle?'On':'Off',d.pictureCycle?'on':'')+(d.pictureCycle?uiNeedNotes('picture'):'')+'</div></div>'+switchMarkup('data-osd="pictureCycle"',!!d.pictureCycle,dockBusy||!d.installed,'Picture mode')+modeChips+osdConflictMarkup('pictureCycle')+'</div>';
+ // The preview beside the switches, as on the other tabs; drawn again only when the bar moves to another edge or chosen modes change.
+ var showKey=edge+'|'+modes.join(',')+'|'+choices.join(',')+'|'+(!!d.pictureCycle);
+ if(osdShowKey===showKey&&box.firstChild&&$('osdParts')){paint($('osdParts'),vol+pad+pic);paint($('osdNeeds'),needs);return}
+ osdShowKey=showKey;
  var slides=[{title:'Volume bar',keys:remoteKey('rocker-vol-up','Vol +')+remoteKey('rocker-vol-down','Vol −')+remoteKey('rocker-vol-press','Mute: press VOL'),text:edgeText(edge),svg:osdVolumePreview(edge,35)},
-  {title:'Number pad',keys:remoteKey('color-123','123'),text:'One row at the bottom.',svg:osdPadPreview()}];
- box.innerHTML='<div class="dock-layout ui-osd"><div class="dock-left panel"><h3>Preview</h3><p class="section-note">The bar follows the position you choose.</p>'+showreel('osd',slides,'The on-screen displays')+'</div><div class="quick-group" id="osdParts">'+vol+pad+'</div><div id="osdNeeds">'+needs+'</div></div>';
+  {title:'Number pad',keys:remoteKey('color-123','123'),text:'One row at the bottom.',svg:osdPadPreview()},
+  {title:'Picture mode',keys:'<kbd class="keycap">Hold Settings</kbd>',text:'Switches between '+modes.join(', ')+'.',svg:osdPicturePreview(modes)}];
+ box.innerHTML='<div class="dock-layout ui-osd"><div class="dock-left panel"><h3>Preview</h3><p class="section-note">The bar follows the position you choose.</p>'+showreel('osd',slides,'The on-screen displays')+'</div><div class="quick-group" id="osdParts">'+vol+pad+pic+'</div><div id="osdNeeds">'+needs+'</div></div>';
 }
 var pluginData=null,pluginError=null,pluginBusy=false;
 var pluginView=null;
@@ -2200,6 +2230,7 @@ function uiClick(e){var b=e.target.closest?e.target.closest('button'):null;if(!b
  if(ds.uiRemote!=null)return switchPanel('remote');
  if(ds.osdCancel!=null){osdAsk=null;renderUi();return}
  if(ds.osdConfirm!=null)return osdToggle(ds.osdConfirm,true,true);
+ if(ds.picMode!=null)return togglePicMode(ds.picMode);
 }
 function uiChange(e){var x=e.target;if(!x.dataset)return;
  if(x.dataset.osd!=null){var name=x.dataset.osd,on=!!x.checked;if(on)x.checked=false;return osdToggle(name,on)}

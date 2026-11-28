@@ -55,5 +55,11 @@ const settle = () => new Promise(r => setTimeout(r, 40));
     const vdown = commands.slice(before).filter(c => c.endsWith('XF86AudioLowerVolume')).length;
     assert.equal(vdown, 1, 'one step, then the stopped bridge ended the repeat (' + vdown + ')');
     assert.equal(vk.reinjectCommand('XF86PowerOff'), null, 'only the four held keys can be sent back this way');
+    // hold-wait / hold on a non-reserved key never fires a user shortcut
+    const beforeHold = commands.length;
+    physical.onEvent({code: 106, action: 'down', decision: 'hold-wait'});
+    physical.onEvent({code: 106, action: 'hold', decision: 'blocked'});
+    await service.context.actionQueue; await settle();
+    assert.equal(commands.length, beforeHold, 'hold-wait and hold never fall through to remap.resolve');
     console.log('PASS locked keys: Vetro UI\'s held keys win over shortcuts, go back to the TV by name when the launcher is down (123 too), never through the tuner routing; a bridge stop ends a held repeat');
 })().catch(e => { console.error(e); process.exitCode = 1; });

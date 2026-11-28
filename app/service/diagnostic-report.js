@@ -207,6 +207,7 @@ var projectors = {
         tizenTubeTile:Array.isArray(d.entries)?d.entries.some(function(e){return LAUNCHER_RE.test(String(e.appId));}):null},
         flags(d,['installed','enabled','running','samsungHome','busy','fixTizenTube','noMotion','autorunSwitchedOff','customHomeDisabled']),
         {mode:['off','vetro','custom'].indexOf(d.mode)>=0?d.mode:null,customApp:boolean(!!d.customApp),volumeBar:boolean(d.volumePill),numberPad:boolean(d.numberPad),
+         pictureCycle:boolean(d.pictureCycle),pictureModeCount:Array.isArray(d.pictureModes)?d.pictureModes.length:null,
          cardCount:Array.isArray(d.cards)?d.cards.length:null,homePictureClears:numeric(d.homePictureClears),homePictureAgoSeconds:numeric(d.homePictureAgoSeconds),appStore:choice(d.appStore,['samsung','tvstore']),events:dockEvents(d.keyLog),
          bootTimeline:d.bootTimeline&&typeof d.bootTimeline==='object'?numbers(d.bootTimeline,['serviceStart','agentSeen','shownAtPowerOn']):null,
          openings:dockOpenings(d.openLog)});},

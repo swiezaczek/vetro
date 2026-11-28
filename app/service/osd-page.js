@@ -138,7 +138,29 @@ function osdTasksPreview() {
     return osdSvg('The launcher’s Control center: two example cards side by side, the running apps with their memory (the first selected) and the sound outputs (TV speakers ticked).', parts);
 }
 
-var FUNCTIONS = [osdSvg, osdBox, osdPanel, osdText, osdGlyph, osdVolumePreview, osdPadPreview, osdTasksPreview];
+// Picture mode capsule at the top right (margin 96, height 72, radius 36): muted "Picture", active mode name, and indicator dots
+// (active dot in light blue #A5D8FF, others white at 28%).
+function osdPicturePreview(modes) {
+    var list = Array.isArray(modes) && modes.length ? modes : ['Filmmaker Mode', 'Movie'];
+    var active = String(list[0] || 'Filmmaker Mode');
+    var safeActive = active.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    var count = Math.max(2, Math.min(10, list.length));
+    var padX = 32, labelW = 94, labelGap = 16, dotsGap = 20, dotSize = 10, dotGap = 8;
+    var valW = Math.round(active.length * 28 * 0.52);
+    var dotsW = count * dotSize + (count - 1) * dotGap;
+    var w = Math.max(240, Math.min(760, padX + labelW + labelGap + valW + dotsGap + dotsW + padX));
+    var x = 1920 - 96 - w, y = 96, h = 72, r = 36, base = y + 46, cy = y + h / 2;
+    var parts = [osdPanel(x, y, w, h, r)];
+    parts.push(osdText(x + padX, base, 28, 0.7, 'Picture'));
+    parts.push(osdText(x + padX + labelW + labelGap, base, 28, 0.96, safeActive, null, '#fff', 600));
+    var dx = x + w - padX - dotsW + dotSize / 2;
+    for (var i = 0; i < count; i++) {
+        parts.push('<circle cx="' + (dx + i * (dotSize + dotGap)) + '" cy="' + cy + '" r="' + (dotSize / 2) + '" fill="' + (i === 0 ? '#a5d8ff' : '#fff') + '"' + (i === 0 ? '' : ' fill-opacity=".28"') + '/>');
+    }
+    return osdSvg('Picture mode capsule at the top right of the screen: ' + safeActive + '.', parts);
+}
+
+var FUNCTIONS = [osdSvg, osdBox, osdPanel, osdText, osdGlyph, osdVolumePreview, osdPadPreview, osdTasksPreview, osdPicturePreview];
 function pageSource() { return FUNCTIONS.map(function (f) { return f.toString(); }).join('\n'); }
 
-module.exports = {volumePreview: osdVolumePreview, padPreview: osdPadPreview, tasksPreview: osdTasksPreview, pageSource: pageSource};
+module.exports = {volumePreview: osdVolumePreview, padPreview: osdPadPreview, tasksPreview: osdTasksPreview, picturePreview: osdPicturePreview, osdPicturePreview: osdPicturePreview, pageSource: pageSource};

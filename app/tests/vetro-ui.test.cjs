@@ -23,7 +23,30 @@ assert.deepEqual(ui.conflicts(rules, ui.keysOf('pad')).map(c => c.rule.id), ['d'
 assert.deepEqual(ui.needs('volume', {enabled: false}, null), ['launcher'], 'input not read yet: only what is known');
 assert.deepEqual(ui.needs('volume', {enabled: true}, {status: {preference: {enabled: false}, policy: {mode: 'off'}}}), ['interception']);
 assert.deepEqual(ui.needs('pad', {mode: 'custom', customApp: 'x'}, {status: {preference: {enabled: true}, policy: {mode: 'filter'}}}), []);
+assert.deepEqual(ui.needs('picture', {enabled: false}, null), ['launcher']);
+assert.deepEqual(ui.needs('picture', {enabled: true}, {status: {preference: {enabled: false}, policy: {mode: 'off'}}}), ['interception']);
+assert.deepEqual(ui.needs('picture', {enabled: true}, {status: {preference: {enabled: true}, policy: {mode: 'observe'}}}), ['listening']);
+assert.deepEqual(ui.needs('picture', {enabled: true}, {status: {preference: {enabled: true}, policy: {mode: 'filter'}}}), []);
 assert.deepEqual(ui.needs('tuner', {enabled: false}, null), []);
+assert.deepEqual(ui.keysOf('picture').map(k => [k.code, k.label, !!k.hold]), [
+    ['140', '123 / Settings', true],
+    ['482', 'Hold Settings', false],
+    ['396', 'Menu / Settings', true],
+    ['127', 'Simple Menu', true],
+    ['590', 'Quick Settings', true]
+]);
+assert.deepEqual(ui.reservedKeys({enabled: true, pictureCycle: true}).map(k => [k.code, k.owner, !!k.hold, k.live]),
+    [['140', 'picture', true, true], ['482', 'picture', false, true], ['396', 'picture', true, true], ['127', 'picture', true, true], ['590', 'picture', true, true]]);
+{
+    const shared = ui.reservedKeys({enabled: true, numberPad: true, pictureCycle: true});
+    assert.deepEqual(shared.map(k => k.code), ['140', '482', '396', '127', '590']);
+    assert.equal(shared[0].owner, 'pad');
+    assert.equal(shared[0].name, 'Number pad \u00b7 Hold: Picture mode');
+    assert.equal(shared[0].hold, true);
+    assert.equal(shared[1].owner, 'picture');
+    assert.equal(shared[1].hold, undefined);
+}
+assert.deepEqual(ui.keysWhen({mode: 'off', pictureCycle: true}, 'vetro').map(k => k.code), ['140', '482', '396', '127', '590']);
 assert.doesNotMatch(ui.pageSource(), /`|\$\{/, 'safe to drop into the page template');
 new Function(ui.pageSource());
 

@@ -47,6 +47,27 @@ assert.throws(() => b.parse(Object.assign({}, file, {schemaVersion: 2})), /newer
 assert.throws(() => b.parse(Object.assign({}, file, {schemaVersion: '1'})), /no valid version/);
 const odd = b.parse(Object.assign({}, file, {sections: Object.assign({}, file.sections, {tuner: {enabled: 'yes'}, launcher: Object.assign({}, file.sections.launcher, {cards: ['rm -rf']}), future: {x: 1}})}));
 assert.deepEqual(odd.dropped.sort(), ['launcher', 'tuner']); assert.ok(!('future' in odd.sections), 'an unknown section is ignored');
+assert.deepEqual(b.parse(Object.assign({}, file, {sections: {launcher: Object.assign({}, file.sections.launcher, {pictureModes: ['Movie']})}})).dropped, ['launcher'], 'need >= 2 picture modes');
+assert.deepEqual(b.parse(Object.assign({}, file, {sections: {launcher: Object.assign({}, file.sections.launcher, {pictureModes: ['Movie', 'UnknownMode']})}})).dropped, ['launcher'], 'unknown picture mode dropped');
+
+// Picture mode cycling round-trip + plan ordering
+{
+    const picSrc = Object.assign({}, src, {dock: Object.assign({}, dock, {pictureCycle: true, pictureModes: ['Standard', 'Movie', 'Filmmaker Mode']})});
+    const picFile = b.build(picSrc);
+    assert.equal(picFile.sections.launcher.pictureCycle, true);
+    assert.deepEqual(picFile.sections.launcher.pictureModes, ['Standard', 'Movie', 'Filmmaker Mode']);
+    const picPlan = b.plan(b.parse(JSON.stringify(picFile)), {sections: b.build(src).sections, root: true, shards: {clock: {enabled: true}}, quick: {alexa: 'off', tvplus: 'off', 'samsung-home': 'on'}, quickLabels: {}, hbbtvValue: 0});
+    const picSteps = picPlan.steps.filter(s => s.path === '/dock').map(s => s.body);
+    assert.deepEqual(picSteps, [
+        {action: 'pictureModes', modes: ['Standard', 'Movie', 'Filmmaker Mode']},
+        {action: 'pictureCycle', on: true}
+    ]);
+    // Old backup without pictureCycle/pictureModes applies cleanly without touching picture settings
+    const oldFile = JSON.parse(JSON.stringify(picFile));
+    delete oldFile.sections.launcher.pictureCycle; delete oldFile.sections.launcher.pictureModes;
+    const oldPlan = b.plan(b.parse(JSON.stringify(oldFile)), {sections: b.build(picSrc).sections, root: true, shards: {clock: {enabled: true}}, quick: {alexa: 'off', tvplus: 'off', 'samsung-home': 'on'}, quickLabels: {}, hbbtvValue: 0});
+    assert.equal(oldPlan.steps.filter(s => s.path === '/dock').length, 0);
+}
 
 // 3. The same TV: nothing to change
 const curOf = (s, extra) => Object.assign({sections: b.build(s).sections, root: s.root, shards: {clock: {enabled: true}},

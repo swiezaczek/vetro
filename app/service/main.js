@@ -1192,8 +1192,8 @@ function runActions(actions, direct, dispatchGuard) {
 }
 var actionQueue=Promise.resolve(), pendingActions=0, inputError=null;
 var volumeKeys=require('./volume-keys.js');
-// The glass volume pill is on when the dock (or the custom launcher) runs and the user switched it on.
-function keyFlags(){var s=dock.readState(),live=s.enabled===true||!!s.customApp;return {volume:live&&s.volumePill===true,pad:live&&s.numberPad===true};}
+// The glass volume pill, number pad, and picture-mode cycling are active when the dock (or the custom launcher) runs and the user switched them on.
+function keyFlags(){var s=dock.readState(),live=s.enabled===true||!!s.customApp;return {volume:live&&s.volumePill===true,pad:live&&s.numberPad===true,picture:live&&s.pictureCycle===true};}
 var keyRouting=require('./key-routing.js');
 // volumeRoute (diagnostics): which way the last Vol / 123 key went to the launcher (its FIFO opened by the service, or written by the root
 // agent once the service was refused), or back to Samsung, with the service's errno for its own open. In memory only.
@@ -1217,8 +1217,9 @@ var physicalHooks={onStop:function(lost){volumeRepeat.stop();if(lost)inputNote(l
         if(bridgeWait&&status&&status.policy&&status.policy.mode==='filter'){bridgeWait.bridgeMs=Date.now()-bridgeWait.agentAt;bridgeTiming[bridgeTiming.first?'last':'first']=bridgeWait;bridgeWait=null;}
         if(status&&status.policy&&status.policy.mode==='filter')agentExecute(keyRouting.rescanCommand(),5000).catch(function(){});}};
 var physical=new PhysicalInput(agentExecute,function(event){
-    if(inputLifecycleActive&&volumeKeys.wants(event,keyFlags())){
-        volumeRepeat.event(event);
+    var flags=keyFlags();
+    if(inputLifecycleActive&&volumeKeys.wants(event,flags)){
+        volumeRepeat.event(event,flags);
         return;
     }
     if(!inputLifecycleActive||event.action!=='down'||event.decision!=='blocked')return;
@@ -1265,7 +1266,7 @@ var vetroUi=require('./vetro-ui.js'),vetroUiInputProblem=null;
 // parts go off again, an interception Vetro UI started itself is turned off, unless shortcuts of the user's own still need it.
 function vetroUiInput(){
     inputRetryReset();
-    var flags=keyFlags(),wants=flags.volume||flags.pad,pref=remapStore.input||{};
+    var flags=keyFlags(),wants=flags.volume||flags.pad||flags.picture,pref=remapStore.input||{};
     if(!wants){
         vetroUiInputProblem=null;
         var own=remapStore.rules.some(function(r){return r.enabled&&r.trigger.type==='physical';});
@@ -1279,7 +1280,7 @@ function vetroUiInput(){
         var keyed=candidates.filter(function(d){try{return KEY_CAPABILITY_RE.test(require('fs').readFileSync('/sys/class/input/'+d.node.split('/').pop()+'/device/capabilities/key','utf8'));}catch(e){return false;}});
         var device=candidates.length===1?candidates[0]:keyed.length===1?keyed[0]:null;
         if(!device)throw new Error(candidates.length?'More than one remote was found: choose yours in the Remapper and turn the interception on there.':'No remote was found to listen to.');
-        var still=keyFlags();if(!still.volume&&!still.pad)return null;   // switched off again while the remotes were being listed
+        var still=keyFlags();if(!still.volume&&!still.pad&&!still.picture)return null;   // switched off again while the remotes were being listed
         stopInput('vetro-ui');
         return physical.start(device.node,'filter',inputTokens(),list);
     }).then(function(status){

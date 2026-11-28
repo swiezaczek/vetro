@@ -21,6 +21,14 @@ var UI_RESERVED = [
     {code: '140', label: '123', owner: 'pad', name: 'Number pad', icon: 'color-123'}
 ];
 
+var UI_PICTURE_KEYS = [
+    {code: '140', label: '123 / Settings', owner: 'picture', name: 'Picture mode', icon: 'color-123', hold: true},
+    {code: '482', label: 'Hold Settings', owner: 'picture', name: 'Picture mode'},
+    {code: '396', label: 'Menu / Settings', owner: 'picture', name: 'Picture mode', hold: true},
+    {code: '127', label: 'Simple Menu', owner: 'picture', name: 'Picture mode', hold: true},
+    {code: '590', label: 'Quick Settings', owner: 'picture', name: 'Picture mode', hold: true}
+];
+
 // The keys Vetro TV Tuner answers (evdev codes of the remote, tuner/src/Program.cs). The remote bridge does not pass on a key that a
 // shortcut of the user's holds, and the tuner reads the bridge's copy of the remote: such a key never reaches the tuner.
 // The keys the launcher's Control center needs (Down opens it from the apps row, Left / Right move between its cards, OK acts on a row:
@@ -41,19 +49,52 @@ function uiLauncherMode(d) {
     return d.customApp ? 'custom' : d.enabled ? 'vetro' : 'off';
 }
 
-// The keys Vetro UI holds now: one row per key of a part that is switched on. live is false while the launcher process,
-// which draws the part, is off (the key is then left to Samsung).
-function uiReservedKeys(d) {
+function uiPictureKeyList(d) {
     var live = uiLauncherMode(d) !== 'off', out = [];
-    for (var i = 0; i < UI_RESERVED.length; i++) {
-        var k = UI_RESERVED[i], on = !!d && (k.owner === 'volume' ? d.volumePill === true : d.numberPad === true);
-        if (on) out.push({code: k.code, label: k.label, owner: k.owner, name: k.name, icon: k.icon, live: live});
+    for (var i = 0; i < UI_PICTURE_KEYS.length; i++) {
+        var k = UI_PICTURE_KEYS[i];
+        var entry = {code: k.code, label: k.label, owner: k.owner, name: k.name, icon: k.icon || null, live: live};
+        if (k.hold === true) entry.hold = true;
+        out.push(entry);
     }
     return out;
 }
 
-// The keys of one part ('volume' or 'pad'), whether it is on or not: what switching it on would take.
-function uiKeysOf(owner) {
+function uiPictureKeys(d) {
+    return d && d.pictureCycle === true ? uiPictureKeyList(d) : [];
+}
+
+// The keys Vetro UI holds now: one row per key of a part that is switched on. live is false while the launcher process,
+// which draws the part, is off (the key is then left to Samsung).
+function uiReservedKeys(d) {
+    var live = uiLauncherMode(d) !== 'off', out = [], byCode = {};
+    for (var i = 0; i < UI_RESERVED.length; i++) {
+        var k = UI_RESERVED[i], on = !!d && (k.owner === 'volume' ? d.volumePill === true : d.numberPad === true);
+        if (on) {
+            byCode[k.code] = out.length;
+            out.push({code: k.code, label: k.label, owner: k.owner, name: k.name, icon: k.icon, live: live});
+        }
+    }
+    var pic = uiPictureKeys(d);
+    for (var j = 0; j < pic.length; j++) {
+        var pk = pic[j];
+        if (Object.prototype.hasOwnProperty.call(byCode, pk.code)) {
+            var existing = out[byCode[pk.code]];
+            if (existing.owner === 'pad') {
+                existing.name = 'Number pad \u00b7 Hold: Picture mode';
+                existing.hold = true;
+            }
+        } else {
+            byCode[pk.code] = out.length;
+            out.push(pk);
+        }
+    }
+    return out;
+}
+
+// The keys of one part ('volume', 'pad', or 'picture'), whether it is on or not: what switching it on would take.
+function uiKeysOf(owner, d) {
+    if (owner === 'picture') return uiPictureKeyList(d);
     var out = [];
     for (var i = 0; i < UI_RESERVED.length; i++) if (UI_RESERVED[i].owner === owner) out.push(UI_RESERVED[i]);
     return out;
@@ -74,7 +115,7 @@ function uiConflicts(rules, keys) {
 // input: the GET /input answer ({status: {policy: {connected}, preference: {enabled}}}) or null when not read yet.
 function uiNeeds(part, d, input) {
     var needs = [], mode = uiLauncherMode(d);
-    if (part === 'volume' || part === 'pad') {
+    if (part === 'volume' || part === 'pad' || part === 'picture') {
         if (mode === 'off') needs.push('launcher');
         var st = input && input.status, pref = st && st.preference;
         if (input && !(pref && pref.enabled === true)) needs.push('interception');
@@ -97,11 +138,14 @@ function uiKeysWhen(d, mode) {
     return out;
 }
 
-var FUNCTIONS = [uiLauncherMode, uiReservedKeys, uiKeysOf, uiConflicts, uiNeeds, uiKeysWhen];
+var FUNCTIONS = [uiLauncherMode, uiPictureKeyList, uiPictureKeys, uiReservedKeys, uiKeysOf, uiConflicts, uiNeeds, uiKeysWhen];
 
 // The page's copy of the rules: the list and the functions, ready to drop into its script.
 function pageSource() {
-    return 'var UI_RESERVED=' + JSON.stringify(UI_RESERVED) + ',UI_TUNER_KEYS=' + JSON.stringify(UI_TUNER_KEYS) + ',UI_TASK_KEYS=' + JSON.stringify(UI_TASK_KEYS) + ';\n' + FUNCTIONS.map(function (f) { return f.toString(); }).join('\n');
+    return 'var UI_RESERVED=' + JSON.stringify(UI_RESERVED) + ',UI_TUNER_KEYS=' + JSON.stringify(UI_TUNER_KEYS) + ',UI_TASK_KEYS=' + JSON.stringify(UI_TASK_KEYS) +
+        ',UI_PICTURE_KEYS=' + JSON.stringify(UI_PICTURE_KEYS) + ';\n' +
+        FUNCTIONS.map(function (f) { return f.toString(); }).join('\n');
 }
 
-module.exports = {UI_RESERVED: UI_RESERVED, UI_TUNER_KEYS: UI_TUNER_KEYS, UI_TASK_KEYS: UI_TASK_KEYS, keysWhen: uiKeysWhen, launcherMode: uiLauncherMode, reservedKeys: uiReservedKeys, keysOf: uiKeysOf, conflicts: uiConflicts, needs: uiNeeds, pageSource: pageSource};
+module.exports = {UI_RESERVED: UI_RESERVED, UI_TUNER_KEYS: UI_TUNER_KEYS, UI_TASK_KEYS: UI_TASK_KEYS, UI_PICTURE_KEYS: UI_PICTURE_KEYS,
+    keysWhen: uiKeysWhen, launcherMode: uiLauncherMode, pictureKeys: uiPictureKeys, reservedKeys: uiReservedKeys, keysOf: uiKeysOf, conflicts: uiConflicts, needs: uiNeeds, pageSource: pageSource};

@@ -11,8 +11,10 @@ const {Dock} = require('../service/dock.js');
     assert.deepEqual(vk.withTokens(['560'], {volume: true}), ['560', '66', '67', '68']);
     assert.deepEqual(vk.withTokens(['68'], {volume: true}), ['68', '66', '67']);
     assert.deepEqual(vk.withTokens(['560'], {}), ['560']);
+    assert.deepEqual(vk.withTokens(['560'], {picture: true}), ['560', '482', '140', '396', '127:hold', '590:hold']);
+    assert.deepEqual(vk.withTokens(['396:hold', '127'], {pad: true, picture: true}), ['127', '140', '482', '396', '590:hold'], 'plain tokens override :hold for 140/396; 127 already plain keeps plain');
 
-    const V = {volume: true}, P = {pad: true};
+    const V = {volume: true}, P = {pad: true}, PIC = {picture: true};
     const down = {code: 68, action: 'down', decision: 'blocked'};
     assert.equal(vk.wants(down, V), true);
     assert.equal(vk.wants({code: 67, action: 'repeat', decision: 'blocked'}, V), true);
@@ -21,6 +23,10 @@ const {Dock} = require('../service/dock.js');
     assert.equal(vk.wants({code: 68, action: 'down', decision: 'native'}, V), false, 'not held back');
     assert.equal(vk.wants({code: 66, action: 'down', decision: 'blocked'}, V), true, 'mute is soft, handled by the dock');
     assert.equal(vk.wants({code: 140, action: 'down', decision: 'blocked'}, V), false);
+    assert.equal(vk.wants({code: 127, action: 'down', decision: 'hold-wait'}, PIC), false, 'hold-wait is ignored');
+    assert.equal(vk.wants({code: 127, action: 'hold', decision: 'blocked'}, PIC), true, 'hold event triggers picture cycle');
+    assert.equal(vk.wants({code: 127, action: 'up', decision: 'blocked'}, PIC), true);
+    assert.equal(vk.wants({code: 127, action: 'up', decision: 'native'}, PIC), false);
 
     const written = [];
     const reinjected = [];

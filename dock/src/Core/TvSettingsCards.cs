@@ -1,9 +1,22 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
+using System.Text;
 
 namespace Launcher.Core
 {
+    internal enum PictureCycleKind { Switch, Locked, Unavailable }
+
+    internal sealed class PictureCycleResult
+    {
+        public PictureCycleKind Kind;
+        public int TargetId;
+        public string TargetLabel;
+        public int ActiveIndex;
+        public int TotalCount;
+        public string Note = "";
+    }
     /// <summary>One row of a choice card (Picture mode, Sleep timer, a Shard card): what it says, what choosing it sets, and whether it is the current one.</summary>
     internal sealed class ChoiceRow
     {
@@ -128,11 +141,21 @@ namespace Launcher.Core
                 }
             }
             if (!seenEndRc || values.Count != Candidates.Length) return null;
-            var sb = new System.Text.StringBuilder(values.Count * 6);
+            var sb = new StringBuilder(values.Count * 6);
             for (int i = 0; i < values.Count; i++) sb.Append("i ").Append(values[i].ToString(CultureInfo.InvariantCulture)).Append('\n');
             return sb.ToString();
         }
 
+        /// <summary>Reads current and offered picture modes using the fast group D-Bus call with busctl fallback.</summary>
+        public static ChoiceState ReadState(Func<string, string> read)
+        {
+            string raw = (read != null ? read(GetAndCheckGroupCommand()) : null) ?? "";
+            int split = raw.IndexOf("__GROUP__", StringComparison.Ordinal);
+            string get = split >= 0 ? raw.Substring(0, split) : raw;
+            string groupRaw = split >= 0 ? raw.Substring(split + 9) : "";
+            string checks = ParseGroupReply(groupRaw) ?? (read != null ? read(CheckCommand()) : "");
+            return Build(get, checks);
+        }
         /// <summary>One call for every candidate: each answer on its own line, in the candidates' order.</summary>
         public static string CheckCommand()
         {
@@ -195,6 +218,86 @@ namespace Launcher.Core
         private static void MarkActive(ChoiceState st, string name)
         {
             foreach (ChoiceRow r in st.Rows) if (r.Label == name) r.Active = true;
+        }
+
+        /// <summary>Reads preferred mode names from a newline-delimited file, falling back to Movie / Filmmaker Mode.</summary>
+        public static List<string> ReadModesFile(string path)
+        {
+            var result = new List<string>();
+            try
+            {
+                if (!string.IsNullOrEmpty(path) && File.Exists(path))
+                {
+                    foreach (string line in File.ReadAllLines(path))
+                    {
+                        string t = (line ?? "").Trim();
+                        if (t.Length > 0) result.Add(t);
+                    }
+                }
+            }
+            catch (Exception) { result.Clear(); }
+            if (result.Count == 0)
+            {
+                result.Add("Movie");
+                result.Add("Filmmaker Mode");
+            }
+            return result;
+        }
+
+        /// <summary>Picks the next preferred picture mode offered by the TV.</summary>
+        public static PictureCycleResult PickNext(ChoiceState state, IList<string> preferredNames)
+        {
+            if (state == null || !state.Choosable)
+            {
+                if (state != null && state.Rows.Count == 1)
+                    return new PictureCycleResult
+                    {
+                        Kind = PictureCycleKind.Locked,
+                        TargetId = state.Rows[0].Value,
+                        TargetLabel = state.Rows[0].Label,
+                        Note = "Locked"
+                    };
+                return new PictureCycleResult { Kind = PictureCycleKind.Unavailable, Note = "Not available" };
+            }
+
+            var matched = new List<ChoiceRow>();
+            if (preferredNames != null)
+            {
+                var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                for (int i = 0; i < preferredNames.Count; i++)
+                {
+                    string pref = (preferredNames[i] ?? "").Trim();
+                    if (pref.Length == 0 || !seen.Add(pref)) continue;
+                    for (int j = 0; j < state.Rows.Count; j++)
+                    {
+                        ChoiceRow row = state.Rows[j];
+                        if (string.Equals(row.Label, pref, StringComparison.OrdinalIgnoreCase))
+                        {
+                            matched.Add(row);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (matched.Count == 0)
+                return new PictureCycleResult { Kind = PictureCycleKind.Unavailable, Note = "Not available" };
+
+            int curIdx = -1;
+            for (int i = 0; i < matched.Count; i++)
+            {
+                if (matched[i].Active) { curIdx = i; break; }
+            }
+            int nextIdx = curIdx >= 0 ? (curIdx + 1) % matched.Count : 0;
+            ChoiceRow next = matched[nextIdx];
+            return new PictureCycleResult
+            {
+                Kind = PictureCycleKind.Switch,
+                TargetId = next.Value,
+                TargetLabel = next.Label,
+                ActiveIndex = nextIdx,
+                TotalCount = matched.Count
+            };
         }
     }
 

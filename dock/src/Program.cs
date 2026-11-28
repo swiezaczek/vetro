@@ -1823,6 +1823,89 @@ namespace Launcher
         private static VolumeEdge _volumeEdge = VolumeEdge.Left;
         private static int _pillScreenW = DefaultScreenW, _pillScreenH = DefaultScreenH;
 
+        private sealed class PendingPicToast { public string Label, Value; public int ActiveDot, TotalDots; }
+        private static string _pictureModesPath;
+        private static PictureToast _picToast;
+        private static IntPtr _picToastTimer;
+        private static int _picCycleBusy;
+        private static readonly object PicToastLock = new object();
+        private static PendingPicToast _pendingPicToast;
+        private static readonly Efl.TaskCb PicToastPollCb = OnPicToastPoll;
+
+        private static void PictureNext()
+        {
+            if (System.Threading.Interlocked.CompareExchange(ref _picCycleBusy, 1, 0) != 0) return;
+            string modesPath = _pictureModesPath;
+            if (_picToastTimer == IntPtr.Zero) _picToastTimer = Efl.ecore_timer_add(0.05, PicToastPollCb, IntPtr.Zero);
+            var t = new System.Threading.Thread(() =>
+            {
+                PendingPicToast toast = null;
+                try
+                {
+                    List<string> preferred = PictureModes.ReadModesFile(modesPath);
+                    ChoiceState state = PictureModes.ReadState(Shell.Read);
+                    PictureCycleResult res = PictureModes.PickNext(state, preferred);
+                    if (res.Kind == PictureCycleKind.Switch)
+                    {
+                        string setCmd = PictureModes.SetCommand(res.TargetId);
+                        if (setCmd != null)
+                        {
+                            string reply = Shell.Read(setCmd);
+                            Log("picture cycle: set " + res.TargetLabel + " (" + res.TargetId + ") answered \"" + reply.Trim() + "\"");
+                        }
+                        toast = new PendingPicToast { Label = "Picture", Value = res.TargetLabel, ActiveDot = res.ActiveIndex, TotalDots = res.TotalCount };
+                    }
+                    else if (res.Kind == PictureCycleKind.Locked)
+                    {
+                        Log("picture cycle: locked on " + res.TargetLabel);
+                        string val = string.IsNullOrEmpty(res.TargetLabel) ? "Locked" : res.TargetLabel + " \u00b7 Locked";
+                        toast = new PendingPicToast { Label = "Picture", Value = val, ActiveDot = -1, TotalDots = 0 };
+                    }
+                    else
+                    {
+                        Log("picture cycle: unavailable (" + res.Note + ")");
+                        toast = new PendingPicToast { Label = "Picture", Value = string.IsNullOrEmpty(res.Note) ? "Not available" : res.Note, ActiveDot = -1, TotalDots = 0 };
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log("picture cycle: " + ex.Message);
+                    toast = new PendingPicToast { Label = "Picture", Value = "Not available", ActiveDot = -1, TotalDots = 0 };
+                }
+                finally
+                {
+                    lock (PicToastLock) _pendingPicToast = toast;
+                    System.Threading.Interlocked.Exchange(ref _picCycleBusy, 0);
+                }
+            });
+            t.IsBackground = true;
+            t.Name = "picture-cycle";
+            t.Start();
+        }
+
+        private static byte OnPicToastPoll(IntPtr data)
+        {
+            try
+            {
+                bool busy = System.Threading.Volatile.Read(ref _picCycleBusy) != 0;
+                PendingPicToast toast;
+                lock (PicToastLock) { toast = _pendingPicToast; _pendingPicToast = null; }
+                if (toast != null) ShowPicToast(toast);
+                if (busy) return 1;
+                lock (PicToastLock) { toast = _pendingPicToast; _pendingPicToast = null; }
+                if (toast != null) ShowPicToast(toast);
+            }
+            catch (Exception ex) { Log("picture toast poll: " + ex.Message); }
+            _picToastTimer = IntPtr.Zero;
+            return 0;
+        }
+
+        private static void ShowPicToast(PendingPicToast toast)
+        {
+            if (_picToast == null) _picToast = new PictureToast(Path.Combine(AppContext.BaseDirectory, "res"), Log, _pillScreenW, _pillScreenH);
+            _picToast.Show(toast.Label, toast.Value, toast.ActiveDot, toast.TotalDots);
+        }
+
         private const string MuteKey = "memory/org.tizen.tv-viewer/mute_status";
 
         /// <summary>Samsung's own mute state (tv-viewer keeps it in a vconf bool; the sound manager does not know it).</summary>
@@ -2022,15 +2105,7 @@ namespace Launcher
             switch (card.Kind)
             {
                 case CardKind.Picture:
-                    return new ChoiceSource("picture mode", () =>
-                    {
-                        string raw = Shell.Read(PictureModes.GetAndCheckGroupCommand());
-                        int split = raw.IndexOf("__GROUP__", StringComparison.Ordinal);
-                        string get = split >= 0 ? raw.Substring(0, split) : raw;
-                        string groupRaw = split >= 0 ? raw.Substring(split + 9) : "";
-                        string checks = PictureModes.ParseGroupReply(groupRaw) ?? Shell.Read(PictureModes.CheckCommand());
-                        return PictureModes.Build(get, checks);
-                    }, PictureModes.SetCommand, Log);
+                    return new ChoiceSource("picture mode", () => PictureModes.ReadState(Shell.Read), PictureModes.SetCommand, Log);
                 case CardKind.Sleep:
                     return new ChoiceSource("sleep timer", () => SleepTimer.Build(Shell.Read(SleepTimer.ReadCommand())), SleepTimer.SetCommand, Log);
                 case CardKind.Shard:
@@ -2194,9 +2269,10 @@ namespace Launcher
                             case Command.Hide: _perfWhy = "fifo-hide"; HideDock(); break;
                             case Command.Toggle: ClosePad(); _perfWhy = "fifo-toggle"; if (DockActive) HideDock(); else { ProbeBegin("fifo toggle"); ShowDock(); ProbeHandlerDone(); } break;
                             case Command.VolUp: case Command.VolDown: case Command.VolMute: VolumeKey(c); break;
-                            case Command.Pad: TogglePad(); break;
+                            case Command.Pad: if (_picToast != null && _picToast.IsOnScreen) PictureNext(); else TogglePad(); break;
                             case Command.Rescan: if (_inputFds.Count > 0 || _homeCode > 0 || _learn) WatchNewNodes(); break;
                             case Command.Reload: ReloadLists(); break;
+                            case Command.PicNext: PictureNext(); break;
                         }
                     }
                 }
@@ -2694,6 +2770,7 @@ namespace Launcher
             _perf = Flag(args, "--perf");
             _probe = new OpenProbe();
             _volumeEdge = VolumePlacement.ParseEdge(Arg(args, "--volume-edge"));
+            _pictureModesPath = Arg(args, "--picture-modes-file");
             ShardLaunch.ServicePort = ShardLaunch.ParsePort(Arg(args, "--service-port"));
             // --no-motion (Reduce motion): show, hide, page changes and navigation are immediate; no icon zoom or lift.
             if (Flag(args, "--no-motion")) { Controller.Instant = true; DockLayout.Grow = false; DockLayout.GlowFromIcon = false; PadMotion.Instant = true; VolumeFade.Instant = true; }

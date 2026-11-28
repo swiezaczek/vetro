@@ -2148,6 +2148,7 @@ namespace Launcher.Tests
 
             Console.WriteLine();
             LauncherRegressionTests.Run();
+            PictureCycleTests.Run();
             Console.WriteLine(T.Checks + " checks, " + T.Failures + " failures");
             return T.Failures == 0 ? 0 : 1;
         }

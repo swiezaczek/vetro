@@ -50,11 +50,11 @@ const tick = async (n) => { for (let i = 0; i < (n || 4); i++) await new Promise
     // The overview: one switch per part, and how they work together.
     sandbox.showUiTab('overview'); sandbox.renderUi();
     let over = el('uiOverview').innerHTML;
-    ['data-ui-launcher', 'data-ui-tuner', 'data-ui-osd="volumePill"', 'data-ui-osd="numberPad"'].forEach(a => assert.ok(over.includes(a), 'overview switch: ' + a));
+    ['data-ui-launcher', 'data-ui-tuner', 'data-ui-osd="volumePill"', 'data-ui-osd="numberPad"', 'data-ui-osd="pictureCycle"'].forEach(a => assert.ok(over.includes(a), 'overview switch: ' + a));
     assert.match(over, /The Home key opens the Vetro launcher/);
     assert.match(over, /drawn by the launcher/); assert.match(over, /which Vetro UI turns on for you/); assert.match(over, /Vetro UI comes first/);
-    // The slideshow beside the switches: the launcher rising, the guide scrolling, the bar, the pad, the task manager.
-    assert.match(over, /data-show="overview"/); assert.equal((over.match(/class="tuner-shot tshow-slide/g) || []).length, 5);
+    // The slideshow beside the switches: the launcher rising, the guide scrolling, the bar, the pad, Picture mode, the task manager.
+    assert.match(over, /data-show="overview"/); assert.equal((over.match(/class="tuner-shot tshow-slide/g) || []).length, 6);
     assert.match(over, /class="lp[^"]* lp-rise"/); assert.match(over, /Up opens Sources/); assert.match(over, /Up, while watching live TV/); assert.match(over, /class="tg-scroll"/); assert.match(over, /tshow-slide is-on/);
     assert.match(over, /data-show-pause aria-pressed="false"/);
 
